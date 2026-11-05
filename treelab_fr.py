@@ -48,6 +48,7 @@ import json
 import random
 import re
 import math
+import webbrowser
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font as tkfont
 
@@ -176,6 +177,76 @@ def arbre_expression(expression):
         else: pile.append(Noeud(tok))
     if len(pile) != 1: raise ValueError("Expression invalide.")
     return pile[0]
+
+
+def texte_notations(notation, racine, enfants):
+    """Construit le texte des cinq notations à partir de la table parent -> enfants.
+
+    notation est la notation parent-enfants brute, racine le nom de la racine et
+    enfants un dictionnaire {nom: [noms des fils]} dont l'ordre est conservé.
+    """
+    def imbrique(nom):
+        fils = enfants[nom]
+        return nom if not fils else f"{nom}({', '.join(imbrique(f) for f in fils)})"
+
+    lignes = ["1) NOTATION PARENT-ENFANTS", notation.strip(), "",
+              "2) NOTATION PARENTHÉSÉE IMBRIQUÉE", imbrique(racine), "",
+              "3) REPRÉSENTATION INDENTÉE"]
+
+    def dessiner_indente(nom, prefixe="", dernier=True, racine_locale=False):
+        if racine_locale:
+            lignes.append(nom)
+        else:
+            lignes.append(prefixe + ("└── " if dernier else "├── ") + nom)
+        fils = enfants[nom]
+        suite = "" if racine_locale else prefixe + ("    " if dernier else "│   ")
+        for i, fils_nom in enumerate(fils):
+            dessiner_indente(fils_nom, suite, i == len(fils) - 1)
+    dessiner_indente(racine, racine_locale=True)
+    lignes += ["", "4) LISTE DES ENFANTS"]
+    for nom, fils in enfants.items():
+        lignes.append(f"{nom} : {', '.join(fils) if fils else 'aucun'}")
+    lignes += ["", "5) CODAGE BINAIRE (fils gauche / frère droit)"]
+    for nom, fils in enfants.items():
+        gauche = fils[0] if fils else "NULL"
+        lignes.append(f"{nom} : gauche = {gauche}")
+        for i in range(1, len(fils)):
+            lignes.append(f"{fils[i]} : droite = frère {fils[i - 1]}")
+    return "\n".join(lignes)
+
+
+def notations_depuis_arbre_binaire(r):
+    """Produit les cinq notations de l'arbre binaire dessiné.
+
+    Les valeurs en double sont rendues uniques par un suffixe (_1, _2...) afin
+    que chaque nœud garde un nom distinct dans les notations.
+    """
+    if r is None:
+        return "Arbre vide : aucune notation à afficher."
+    ns = noeuds(r, "RGD")
+    freq = {}
+    for n in ns:
+        freq[str(n.valeur)] = freq.get(str(n.valeur), 0) + 1
+    vus, noms = {}, {}
+    for n in ns:
+        base = str(n.valeur)
+        if freq[base] > 1:
+            vus[base] = vus.get(base, 0) + 1
+            noms[n] = f"{base}_{vus[base]}"
+        else:
+            noms[n] = base
+    enfants = {}
+    for niveau in niveaux(r):
+        for n in niveau:
+            enfants[noms[n]] = [noms[f] for f in (n.gauche, n.droite) if f is not None]
+    morceaux = [f"{noms[n]}({','.join(noms[f] for f in (n.gauche, n.droite) if f is not None)})"
+                for n in ns if nb_fils(n) > 0]
+    notation = "; ".join(morceaux) if morceaux else noms[r]
+    texte = texte_notations(notation, noms[r], enfants)
+    if any(c > 1 for c in freq.values()):
+        texte += ("\n\nNote : certaines valeurs apparaissent plusieurs fois ; elles sont "
+                  "numérotées (_1, _2...) pour distinguer les nœuds.")
+    return texte
 
 
 def code_structure_python(r):
@@ -1919,6 +1990,9 @@ class Application(tk.Tk):
                  fg="white").pack(anchor="w")
         tk.Label(bloc, text="by Nadir BOUCHAMA", font=("Arial", 11, "italic"), bg=C_ENTETE,
                  fg="#E8D39A").pack(anchor="w")
+        tk.Button(entete, text="À propos", command=self.a_propos, bg="#E8D39A", fg="#352817",
+                  activebackground="#D9BC72", relief="flat", padx=10, pady=3,
+                  cursor="hand2").pack(side="right", padx=(0, 14))
         tk.Label(entete, text="Arbres binaires · Algorithmique ISIL 2", font=("Arial", 11),
                  bg=C_ENTETE, fg="#E8D39A").pack(side="right", padx=14)
 
@@ -1944,12 +2018,14 @@ class Application(tk.Tk):
         # ----- partie droite
         droite = ttk.Frame(self)
         droite.grid(row=1, column=1, sticky="nsew")
-        paned = ttk.PanedWindow(droite, orient="vertical")
+        # PanedWindow classique : séparateur épais, facile à saisir et à déplacer.
+        paned = tk.PanedWindow(droite, orient="vertical", sashwidth=9, sashrelief="raised",
+                               sashcursor="sb_v_double_arrow", opaqueresize=True,
+                               bg="#C49A3A", bd=0)
         paned.pack(fill="both", expand=True)
 
-
         haut = ttk.Frame(paned)
-        paned.add(haut, weight=4)
+        paned.add(haut, stretch="always", minsize=160)
         barre = ttk.Frame(haut, padding=(6, 4))
         barre.pack(fill="x")
         self.lbl_seq = ttk.Label(barre, text="", font=("Arial", 13, "bold"),
@@ -2006,11 +2082,13 @@ class Application(tk.Tk):
         self.canvas.bind("<MouseWheel>", self.roulette_canvas)
         self.canvas.bind("<Configure>", lambda e: self.dessiner())
 
-        bas = ttk.PanedWindow(paned, orient="horizontal")
-        paned.add(bas, weight=2)
+        bas = tk.PanedWindow(paned, orient="horizontal", sashwidth=9, sashrelief="raised",
+                             sashcursor="sb_h_double_arrow", opaqueresize=True,
+                             bg="#C49A3A", bd=0)
+        paned.add(bas, stretch="never", minsize=120, height=300)
 
         cadre_algo = ttk.LabelFrame(bas, text="Algorithme")
-        bas.add(cadre_algo, weight=1)
+        bas.add(cadre_algo, stretch="always", minsize=200)
         self.mode_code = tk.StringVar(value="pseudo")
         self.algo_courant = None
         barre_code = ttk.Frame(cadre_algo)
@@ -2031,13 +2109,21 @@ class Application(tk.Tk):
         self.txt_algo.tag_configure("com", foreground="#7EC27E")
 
         self.res_notebook = ttk.Notebook(bas)
-        bas.add(self.res_notebook, weight=1)
+        bas.add(self.res_notebook, stretch="always", minsize=200)
         f_res = ttk.Frame(self.res_notebook)
         f_trace = ttk.Frame(self.res_notebook)
         f_cours = ttk.Frame(self.res_notebook)
+        f_notations = ttk.Frame(self.res_notebook)
         self.res_notebook.add(f_res, text="Résultat")
         self.res_notebook.add(f_trace, text="Trace d'exécution")
+        self.res_notebook.add(f_notations, text="Notations de l'arbre")
         self.res_notebook.add(f_cours, text="Cours")
+        self.txt_notations_arbre = self.creer_texte(f_notations)
+        self.txt_notations_arbre.configure(wrap="none", font=("Consolas", 10))
+        sbh = ttk.Scrollbar(f_notations, orient="horizontal", command=self.txt_notations_arbre.xview)
+        self.txt_notations_arbre.configure(xscrollcommand=sbh.set)
+        sbh.pack(side="bottom", fill="x", before=self.txt_notations_arbre.master)
+        self.tab_notations_arbre = f_notations
         f_code = ttk.Frame(self.res_notebook)
         self.res_notebook.add(f_code, text="Code de l'arbre")
         self.tab_code = f_code
@@ -2360,34 +2446,51 @@ class Application(tk.Tk):
             self.ecrire(self.txt_notations, f"Notation invalide\n\n{e}")
             return
 
-        def imbrique(nom):
-            fils = enfants[nom]
-            return nom if not fils else f"{nom}({', '.join(imbrique(f) for f in fils)})"
-
-        lignes = ["1) NOTATION PARENT-ENFANTS", self.notation_var.get().strip(), "",
-                  "2) NOTATION PARENTHÉSÉE IMBRIQUÉE", imbrique(racine), "",
-                  "3) REPRÉSENTATION INDENTÉE"]
-        def dessiner_indente(nom, prefixe="", dernier=True, racine_locale=False):
-            if racine_locale:
-                lignes.append(nom)
-            else:
-                lignes.append(prefixe + ("└── " if dernier else "├── ") + nom)
-            fils = enfants[nom]
-            suite = "" if racine_locale else prefixe + ("    " if dernier else "│   ")
-            for i, fils_nom in enumerate(fils):
-                dessiner_indente(fils_nom, suite, i == len(fils) - 1)
-        dessiner_indente(racine, racine_locale=True)
-        lignes += ["", "4) LISTE DES ENFANTS"]
-        for nom, fils in enfants.items():
-            lignes.append(f"{nom} : {', '.join(fils) if fils else 'aucun'}")
-        lignes += ["", "5) CODAGE BINAIRE (fils gauche / frère droit)"]
-        for nom, fils in enfants.items():
-            gauche = fils[0] if fils else "NULL"
-            lignes.append(f"{nom} : gauche = {gauche}")
-            for i in range(1, len(fils)):
-                lignes.append(f"{fils[i]} : droite = frère {fils[i - 1]}")
         self.vider_texte(self.txt_notations)
-        self.ecrire(self.txt_notations, "\n".join(lignes))
+        self.ecrire(self.txt_notations, texte_notations(self.notation_var.get(), racine, enfants))
+
+    def maj_notations_arbre(self):
+        """Met à jour le panneau des notations de l'arbre actuellement dessiné."""
+        if not hasattr(self, "txt_notations_arbre"):
+            return
+        self.vider_texte(self.txt_notations_arbre)
+        self.ecrire(self.txt_notations_arbre, notations_depuis_arbre_binaire(self.racine))
+        self.txt_notations_arbre.see("1.0")
+
+    def a_propos(self):
+        """Affiche la fenêtre « À propos » de TreeLab."""
+        fen = tk.Toplevel(self)
+        fen.title("À propos de TreeLab")
+        fen.configure(bg="#F7F2E7")
+        fen.resizable(False, False)
+        fen.transient(self)
+        tk.Label(fen, text="TreeLab", font=("Arial", 22, "bold"), bg="#F7F2E7",
+                 fg="#805B12").pack(padx=24, pady=(18, 0))
+        tk.Label(fen, text="TreeLab by Nadir BOUCHAMA", font=("Arial", 11, "italic"),
+                 bg="#F7F2E7", fg=C_ENCRE).pack(pady=(0, 10))
+        tk.Label(fen, justify="left", wraplength=480, bg="#F7F2E7", fg=C_ENCRE,
+                 font=("Arial", 10), text=(
+            "TreeLab est une application de bureau pédagogique dédiée à l’apprentissage "
+            "des arbres binaires et des arbres binaires de recherche. Elle associe une "
+            "représentation graphique interactive à des animations pas à pas pour rendre "
+            "visibles les opérations habituellement étudiées à travers du code ou des "
+            "schémas statiques.\n\n"
+            "L’application s’adresse notamment aux étudiants en algorithmique et en "
+            "structures de données. Elle permet de construire un arbre, de lancer une "
+            "opération et d’observer son effet sur les nœuds, les liens et les résultats "
+            "affichés.")).pack(padx=24)
+        tk.Label(fen, text="Novembre 2027", bg="#F7F2E7", fg="#5C5140",
+                 font=("Arial", 10)).pack(pady=(10, 0))
+        mail = tk.Label(fen, text="nadir.bouchama@gmail.com", bg="#F7F2E7", fg="#175CD3",
+                        font=("Arial", 10, "underline"), cursor="hand2")
+        mail.pack()
+        mail.bind("<Button-1>", lambda _e: webbrowser.open("mailto:nadir.bouchama@gmail.com"))
+        ttk.Button(fen, text="Fermer", command=fen.destroy).pack(pady=14)
+        fen.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - fen.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - fen.winfo_height()) // 3
+        fen.geometry(f"+{max(0, x)}+{max(0, y)}")
+        fen.grab_set()
 
     def onglet_calculatrice(self):
         """Crée l'atelier de calcul préfixe/postfixe avec une pile animée."""
@@ -4240,6 +4343,7 @@ class Application(tk.Tk):
         self.historique.append(etat)
         self.historique_index = len(self.historique) - 1
         self._maj_boutons_historique()
+        self.maj_notations_arbre()
 
     def _maj_boutons_historique(self):
         if hasattr(self, "btn_annuler"):
@@ -4264,6 +4368,7 @@ class Application(tk.Tk):
         self.dessiner()
         self._montrer_code_arbre()
         self._maj_boutons_historique()
+        self.maj_notations_arbre()
 
     def annuler(self):
         """Restaure l’état d’arbre précédent."""
