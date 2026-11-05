@@ -14,6 +14,3 @@ Prérequis
 - Tkinter
 Lancer l’application
 python treelab.py
-
-Auteur
-Créé par Nadir BOUCHAMA pour l’enseignement des algorithmes et des structures de données (ISIL 2).
