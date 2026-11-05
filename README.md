@@ -48,5 +48,5 @@ Canvas controls
 
 Files
 
-- treelab.py — French application
+- treelab_fr.py — French-language application
 - treelab_en.py — English-language application
