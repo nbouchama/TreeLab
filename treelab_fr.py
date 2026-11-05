@@ -181,7 +181,7 @@ def arbre_expression(expression):
 def code_structure_python(r):
     """Sérialise l'arbre en code Python recréant ses valeurs et ses liens."""
     lignes = ["class Noeud:", "    def __init__(self, valeur):", "        self.valeur = valeur",
-              "        self.gauche = None", "        self.droite = None", "", "# Current tree"]
+              "        self.gauche = None", "        self.droite = None", "", "# Arbre courant"]
     if r is None: return "\n".join(lignes + ["racine = None"])
     lignes += ["", "def construire(t):", "    if t is None: return None",
                "    n = Noeud(t[0])",
@@ -1754,7 +1754,7 @@ class Application(tk.Tk):
     def __init__(self):
         """Initialise l'état du programme, les variables Tkinter et les widgets."""
         super().__init__()
-        self.title("TreeLab by Nadir BOUCHAMA — Binary Trees (Algorithms, ISIL 2)")
+        self.title("TreeLab by Nadir BOUCHAMA — Arbres binaires (Algorithmique ISIL 2)")
         self.configure(bg="#F7F2E7")
         self.geometry("1400x880")
         self.minsize(1120, 720)
@@ -1812,7 +1812,7 @@ class Application(tk.Tk):
         self.quiz_idx = None
         self.quiz_repondu = False
         self.score = [0, 0]
-        self.defi_niveau = tk.StringVar(value="Beginner")
+        self.defi_niveau = tk.StringVar(value="Débutant")
         self.defi_reponse = tk.StringVar()
         self.defi_attendu = None
         self.defi_explication = ""
@@ -1821,7 +1821,7 @@ class Application(tk.Tk):
         self.construction_valeurs = []
         self.construction_index = 0
         self.dessin_manuel = tk.BooleanVar(value=False)
-        self.dessin_cote = tk.StringVar(value="left")
+        self.dessin_cote = tk.StringVar(value="gauche")
         self.dessin_valeur = tk.StringVar(value="")
         self.na_var = tk.StringVar(value="A(B,C,D); B(E,F); C(G)")
         self.sim_na_actions = []
@@ -1830,11 +1830,11 @@ class Application(tk.Tk):
         self.sim_na_actif = False
         self.notation_var = tk.StringVar(value="A(B,C); B(E,T)")
         self.calcul_expression = tk.StringVar(value="3 5 + 4 * 2 -")
-        self.calcul_format = tk.StringVar(value="Postfix (reverse Polish)")
-        self.calcul_notation = tk.StringVar(value="Postfix (reverse Polish)")
+        self.calcul_format = tk.StringVar(value="Postfixe (polonaise inversée)")
+        self.calcul_notation = tk.StringVar(value="Postfixe (polonaise inversée)")
         self.calcul_pile = tk.StringVar(value="Pile : []")
         self.qcm_n_var = tk.StringVar(value="9")
-        self.qcm_type_var = tk.StringVar(value="Balanced BST")
+        self.qcm_type_var = tk.StringVar(value="ABR équilibré")
         self.qcm_reponse_var = tk.StringVar(value="")
         self.qcm_questions = []
         self.qcm_index = -1
@@ -2185,7 +2185,7 @@ class Application(tk.Tk):
         ttk.Label(manuel, text="Valeur :").pack(side="left")
         ttk.Entry(manuel, textvariable=self.dessin_valeur, width=7).pack(side="left", padx=4)
         ttk.Label(manuel, text="Côté :").pack(side="left", padx=(5, 2))
-        ttk.Combobox(manuel, textvariable=self.dessin_cote, values=("left", "right"),
+        ttk.Combobox(manuel, textvariable=self.dessin_cote, values=("gauche", "droite"),
                      state="readonly", width=8).pack(side="left")
         ttk.Label(f, text="Clique sur le canevas pour poser la racine. Ensuite, sélectionne un parent, "
                      "choisis le côté et clique à l’emplacement du nouveau fils.",
@@ -2399,11 +2399,11 @@ class Application(tk.Tk):
         ttk.Entry(f, textvariable=self.calcul_expression).grid(row=2, column=0, sticky="ew", pady=5)
         ttk.Label(f, text="Format de la formule saisie :").grid(row=3, column=0, sticky="w")
         ttk.Combobox(f, textvariable=self.calcul_format,
-                     values=("Infix", "Prefix (Polish)", "Postfix (reverse Polish)"),
+                     values=("Infixe", "Préfixe (polonaise)", "Postfixe (polonaise inversée)"),
                      state="readonly").grid(row=4, column=0, sticky="ew", pady=3)
         ttk.Label(f, text="Notation à simuler :").grid(row=5, column=0, sticky="w")
         ttk.Combobox(f, textvariable=self.calcul_notation,
-                     values=("Prefix (Polish)", "Postfix (reverse Polish)"),
+                     values=("Préfixe (polonaise)", "Postfixe (polonaise inversée)"),
                      state="readonly").grid(row=6, column=0, sticky="ew", pady=3)
         ttk.Button(f, text="▶ Calculer et simuler", command=self.calculer_notation).grid(
             row=7, column=0, sticky="ew", pady=4)
@@ -2435,7 +2435,7 @@ class Application(tk.Tk):
                 for token in tokens_entree:
                     if token not in operateurs and not re.fullmatch(r"-?\d+(?:\.\d+)?", token):
                         raise ValueError(f"Symbole invalide : {token}. Utilisez des nombres et + - * / ^.")
-                ordre_prefixe = format_entree.startswith("Prefix")
+                ordre_prefixe = format_entree.startswith("Préfixe")
                 parcours_tokens = list(reversed(tokens_entree)) if ordre_prefixe else tokens_entree
                 pile_noeuds = []
                 for token in parcours_tokens:
@@ -2461,7 +2461,7 @@ class Application(tk.Tk):
                 raise ValueError("La calculatrice attend des nombres, sans variables.")
             prefixe = [str(n.valeur) for n in noeuds_prefixes]
             postfixe = [str(n.valeur) for n in noeuds_postfixes]
-            est_prefixe = self.calcul_notation.get().startswith("Prefix")
+            est_prefixe = self.calcul_notation.get().startswith("Préfixe")
             if est_prefixe:
                 tokens = list(reversed(prefixe))
                 cibles = list(reversed(noeuds_prefixes))
@@ -2937,8 +2937,8 @@ class Application(tk.Tk):
         ttk.Entry(config, textvariable=self.qcm_n_var, width=5).grid(row=0, column=1, padx=4)
         ttk.Label(config, text="Type :").grid(row=1, column=0, sticky="w", pady=3)
         ttk.Combobox(config, textvariable=self.qcm_type_var,
-                     values=("Balanced BST", "Random BST", "Complete tree",
-                             "General binary tree", "Degenerate tree"),
+                     values=("ABR équilibré", "ABR aléatoire", "Arbre complet",
+                             "Arbre quelconque", "Dégénéré"),
                      state="readonly", width=20).grid(row=1, column=1, sticky="ew", padx=4)
         config.columnconfigure(1, weight=1)
         ttk.Button(f, text="🌳 Générer l’arbre et les 20 questions",
@@ -2985,20 +2985,20 @@ class Application(tk.Tk):
             return
         valeurs_qcm = random.sample(range(1, 100), n)
         type_qcm = self.qcm_type_var.get()
-        if type_qcm == "Balanced BST":
+        if type_qcm == "ABR équilibré":
             racine = construire_equilibre(sorted(valeurs_qcm))
-        elif type_qcm == "Random BST":
+        elif type_qcm == "ABR aléatoire":
             racine = None
             for valeur in random.sample(valeurs_qcm, len(valeurs_qcm)):
                 racine = self._inserer_dans(racine, valeur)
-        elif type_qcm == "Complete tree":
+        elif type_qcm == "Arbre complet":
             ns = [Noeud(v) for v in valeurs_qcm]
             for i, noeud in enumerate(ns):
                 gi, di = 2 * i + 1, 2 * i + 2
                 if gi < n: noeud.gauche = ns[gi]
                 if di < n: noeud.droite = ns[di]
             racine = ns[0]
-        elif type_qcm == "Degenerate tree":
+        elif type_qcm == "Dégénéré":
             racine = Noeud(valeurs_qcm[0])
             courant = racine
             for valeur in valeurs_qcm[1:]:
@@ -3188,7 +3188,7 @@ class Application(tk.Tk):
         ligne.grid(row=1, column=0, sticky="ew", pady=4)
         ttk.Label(ligne, text="Niveau :").pack(side="left")
         ttk.Combobox(ligne, textvariable=self.defi_niveau,
-                     values=("Beginner", "Intermediate", "Expert"),
+                     values=("Débutant", "Intermédiaire", "Expert"),
                      state="readonly", width=15).pack(side="left", padx=5)
         ttk.Button(f, text="🎲 Nouveau défi", command=self.nouveau_defi).grid(
             row=2, column=0, sticky="ew", pady=3)
@@ -3221,13 +3221,13 @@ class Application(tk.Tk):
         if not self.exiger_arbre():
             return
         niveau = self.defi_niveau.get()
-        if niveau == "Beginner":
+        if niveau == "Débutant":
             ordre = random.choice(("RGD", "GRD", "GDR"))
             nom = {"RGD": "préfixé", "GRD": "infixé", "GDR": "postfixé"}[ordre]
             self.defi_attendu = [str(v) for v in valeurs(self.racine, ordre)]
             self.defi_explication = f"Parcours {nom} : { {'RGD':'racine, gauche, droite','GRD':'gauche, racine, droite','GDR':'gauche, droite, racine'}[ordre] }."
             prompt = f"Débutant · Donne le parcours {nom} (RGD/GRD/GDR), dans l’ordre."
-        elif niveau == "Intermediate":
+        elif niveau == "Intermédiaire":
             mesure = random.choice(("hauteur", "feuilles"))
             if mesure == "hauteur":
                 self.defi_attendu = [str(hauteur(self.racine))]
@@ -3383,7 +3383,6 @@ class Application(tk.Tk):
     def dessiner(self):
         """Redessine l'arbre, les pointeurs, les cadres d'appel et les surlignages."""
         c = self.canvas
-        c._treelab_app = self
         self._enregistrer_historique()
         c.delete("all")
         self.emplacements_vides = []
@@ -3529,7 +3528,7 @@ class Application(tk.Tk):
         # Les cercles pointillés représentent des liens NULL encore disponibles.
         for parent, cote, x, y in self.emplacements_vides:
             px, py = self.positions[parent]
-            selectionne = parent is self.selection and self.dessin_cote.get() == _english_side(cote)
+            selectionne = parent is self.selection and self.dessin_cote.get() == cote
             couleur = "#D97706" if selectionne else "#98A2B3"
             c.create_line(px, py + RAYON, x, y - 15, fill=couleur, width=2,
                           dash=(3, 3), arrow="last", arrowshape=(8, 10, 4))
@@ -3634,7 +3633,7 @@ class Application(tk.Tk):
         vide = self.emplacement_vide_en(x, y) if n is None else None
         if vide is not None:
             self.selection, cote, px, py = vide
-            self.dessin_cote.set(_english_side(cote))
+            self.dessin_cote.set(cote)
             self.drag = None
             self.drag_emplacement = (self.selection, cote, px, py)
             self.drag_emplacement_deplace = False
@@ -3660,7 +3659,7 @@ class Application(tk.Tk):
         if self.racine is not None and self.selection is None:
             messagebox.showinfo("Choisir un parent", "Cliquez d'abord sur le nœud parent.")
             return
-        if self.racine is not None and getattr(self.selection, _french_side(self.dessin_cote.get())) is not None:
+        if self.racine is not None and getattr(self.selection, self.dessin_cote.get()) is not None:
             messagebox.showinfo("Emplacement occupé", f"Le fils {self.dessin_cote.get()} existe déjà.")
             return
         try:
@@ -3674,7 +3673,7 @@ class Application(tk.Tk):
             self.racine = n
         else:
             parent = self.selection
-            cote = _french_side(self.dessin_cote.get())
+            cote = self.dessin_cote.get()
             setattr(parent, cote, n)
         self.selection = n
         self.decalages.pop(n, None)
@@ -3725,7 +3724,7 @@ class Application(tk.Tk):
             parent, cote, px, py = self.drag_emplacement
             if self.dessin_manuel.get() and not self.drag_emplacement_deplace:
                 self.selection = parent
-                self.dessin_cote.set(_english_side(cote))
+                self.dessin_cote.set(cote)
                 self.ajouter_noeud_manuel(px, py)
             self.drag_emplacement = None
             self.drag_emplacement_deplace = False
@@ -3764,7 +3763,7 @@ class Application(tk.Tk):
         if vide is not None:
             parent, cote, _, _ = vide
             self.selection = parent
-            self.dessin_cote.set(_english_side(cote))
+            self.dessin_cote.set(cote)
         else:
             self.selection = n
         self.dessiner()
@@ -3848,9 +3847,6 @@ class Application(tk.Tk):
         t.config(state="disabled")
 
     def ecrire(self, t, texte, tag=None):
-        if t not in (getattr(self, "txt_tree_py", None), getattr(self, "txt_tree_c", None),
-                     getattr(self, "txt_tree_java", None)):
-            texte = _english_text(texte)
         t.config(state="normal")
         t.insert("end", texte, tag) if tag else t.insert("end", texte)
         t.see("end")
@@ -5564,250 +5560,9 @@ class Application(tk.Tk):
         self.QUIZ[self.quiz_idx][2]()
 
 
-
-_ENGLISH_PHRASES = {
-    "Résultat": "Results", "Trace d'exécution": "Execution trace", "Cours": "Course",
-    "Code de l'arbre": "Tree code", "Vue d'ensemble": "Overview",
-    "Algorithme": "Algorithm", "Arbre binaire de recherche": "Binary search tree",
-    "Arbre binaire quelconque (le nœud sélectionné est le père)": "General binary tree (selected node is the parent)",
-    "L'arbre est-il … ?": "Tree properties", "Propriétés de forme": "Shape properties",
-    "En profondeur (récursifs)": "Depth-first (recursive)", "En largeur (avec une file)": "Breadth-first (queue)",
-    "Comparer": "Compare", "Comptages": "Counts", "Valeurs": "Values",
-    "Nœud sélectionné": "Selected node", "Générer / charger": "Generate / load",
-    "Animation et affichage": "Animation and display", "Défis gradués": "Progressive challenges",
-    "Arbres rouge-noir": "Red-black trees", "Expression → arbre": "Expression → tree",
-    "Convertisseur d’arbre n-aire": "N-ary tree converter", "Explorer les notations d’arbres": "Explore tree notations",
-    "QCM sur les arbres": "Tree multiple-choice quiz", "Pseudo-code": "Pseudocode",
-    "Afficher en :": "Display as:", "Code Python": "Python code", "Code C": "C code",
-    "Code Java": "Java code", "Python — déclaration et construction": "Python — declaration and construction",
-    "C — structure et déclaration": "C — structure and declaration",
-    "Java — déclaration et construction": "Java — declaration and construction",
-    "ARBRE · VALEUR | GAUCHE | DROITE": "TREE · VALUE | LEFT | RIGHT",
-    "STRUCTURE MÉMOIRE · ADRESSES HEXADÉCIMALES": "MEMORY STRUCTURE · HEX ADDRESSES",
-    "Créer la racine": "Create root", "Modifier la valeur…": "Edit value…",
-    "Copier la valeur": "Copy value", "Informations sur ce nœud": "Node information",
-    "Ajouter un fils gauche": "Add left child", "Ajouter un fils droit": "Add right child",
-    "Supprimer ce sous-arbre": "Delete this subtree", "Miroir de l’arbre": "Mirror the tree",
-    "Successeur infixé (ABR)": "In-order successor (BST)",
-    "Prédécesseur infixé (ABR)": "In-order predecessor (BST)",
-    "Supprimer ce nœud (ABR)": "Delete this node (BST)",
-    "Aucun nœud sous le pointeur": "No node under the pointer",
-    "Aucun nœud sélectionné (cliquez sur un nœud)": "No node selected (click a node)",
-    "Valeur (entier) :": "Value (integer):", "Valeur :": "Value:", "Côté :": "Side:",
-    "Nombre de nœuds (max. 99) :": "Number of nodes (max. 99):",
-    "Afficher les fils absents en pointillés": "Show missing children as dotted links",
-    "Afficher les fils absents": "Show missing children", "Afficher niveau / hauteur": "Show level / height",
-    "Vue valeur / pointeurs": "Value / pointer view", "Colorier les feuilles": "Color leaves",
-    "Animer": "Animate", "Pas à pas": "Step by step", "Mode « Pourquoi ? »": "Why mode",
-    "Détailler sous-arbres vides": "Show empty subtrees", "Lent": "Slow", "Rapide": "Fast",
-    "Plein écran": "Full screen", "⛶ Plein écran": "⛶ Full screen",
-    "Quitter le plein écran  (Échap)": "Exit full screen (Esc)",
-    "Glisser le bouton du milieu pour déplacer · Ctrl + molette pour zoomer": "Middle-drag to pan · Ctrl + wheel to zoom",
-    "Ouvrir…": "Open…", "Enregistrer…": "Save…", "Ouvrir un arbre TreeLab": "Open a TreeLab tree",
-    "Enregistrer l’arbre TreeLab": "Save TreeLab tree", "−": "−", "+": "+", "100%": "100%",
-    "Agrandir": "Zoom in", "Réduire": "Zoom out", "Réinitialiser le zoom": "Reset zoom",
-    "Réinitialiser la disposition": "Reset layout", "↺ Réinitialiser la disposition des nœuds": "↺ Reset node layout",
-    "Annuler": "Undo", "Rétablir": "Redo", "◀ Précédent": "◀ Previous",
-    "Étape suivante ▶": "Next step ▶", "Tout terminer": "Finish all steps",
-    "Pseudocode": "Pseudocode", "Parcours": "Traversal", "Préfixé — RGD": "Preorder — RGD",
-    "Infixé — GRD": "Inorder — GRD", "Postfixé — GDR": "Postorder — GDR",
-    "Infixé inversé — DRG": "Reverse inorder — DRG", "En largeur — niveaux": "Breadth-first — levels",
-    "En profondeur (récursifs)": "Depth-first (recursive)", "En largeur (avec une file)": "Breadth-first (queue)",
-    "Terminer": "Finish", "Suivante →": "Next →", "← Précédente": "← Previous",
-    "Préfixé  (R G D)": "Preorder (R L R)", "Infixé  (G R D)": "Inorder (L R R)",
-    "Postfixé  (G D R)": "Postorder (L R R)", "Infixé inversé  (D R G)": "Reverse inorder (R R L)",
-    "Arbre vide\nCréez la racine, insérez une valeur\nou chargez un exemple (onglet « Arbre »)": "Empty tree\nCreate a root, insert a value,\nor load an example (Tree tab)",
-    "A est la racine ; B, C et D sont ses enfants. B a les enfants E et F.": "A is the root; B, C, and D are its children. B has children E and F.",
-    "Exemple : A(B,C,D); B(E,F); C(G)": "Example: A(B,C,D); B(E,F); C(G)",
-    "Clique sur le canevas pour poser la racine. Ensuite, sélectionne un parent, choisis le côté et clique à l’emplacement du nouveau fils.": "Click the canvas to place the root. Then select a parent, choose a side, and click where the new child should go.",
-    "Le résultat se dessine sur le canevas et les correspondances apparaissent dans Résultat.": "The result is drawn on the canvas; mappings appear in Results.",
-    "Règle : le premier enfant devient le fils gauche. Chaque frère suivant devient le fils droit du frère précédent.": "Rule: the first child becomes the left child. Each next sibling becomes the previous sibling’s right child.",
-    "Décris chaque nœud puis ses enfants entre parenthèses. Sépare les définitions par des points-virgules.": "Enter each node followed by its children in parentheses. Separate definitions with semicolons.",
-    "Moyen mnémotechnique : la position de R dit tout.\n• R au début → PRÉfixé\n• R au milieu → INfixé\n• R à la fin → POSTfixé\n\nCochez « Détailler sous-arbres vides » pour voir chaque appel sur NIL.": "Memory aid: the position of R tells you the traversal.\n• R first → PREorder\n• R in the middle → INorder\n• R last → POSTorder\n\nEnable “Show empty subtrees” to see calls on NIL.",
-    "Aucun nœud sous le pointeur": "No node under the pointer",
-    "✓ Bravo, c'est correct !": "✓ Great, that's correct!",
-    "✗ Pas tout à fait. Réessayez, ou cliquez sur « Voir la correction animée ». ": "✗ Not quite. Try again or view the animated solution.",
-    "Le résultat s’affiche sur le canevas ; les correspondances apparaissent dans Résultat.": "The result appears on the canvas; mappings appear in Results.",
-    "Démarre la simulation pour suivre chaque lien.": "Start the simulation to follow each link.",
-    "Conversion directe terminée. Relance la simulation pour revoir les étapes.": "Direct conversion complete. Restart the simulation to review the steps.",
-    "Conversion n-aire → binaire": "N-ary → binary conversion",
-    "Simulation impossible": "Simulation could not start", "Conversion impossible": "Conversion failed",
-    "Enregistrement impossible": "Save failed", "Ouverture impossible": "Open failed",
-    "Expression invalide": "Invalid expression", "Calcul impossible": "Calculation failed",
-    "Valeur invalide": "Invalid value", "Liste invalide": "Invalid list", "Liste vide": "Empty list",
-    "Arbre vide": "Empty tree", "Aucune sélection": "No selection", "Racine existante": "Root already exists",
-    "Choisir un parent": "Choose a parent", "Emplacement occupé": "Position occupied",
-    "Pas un ABR": "Not a BST", "Configuration invalide": "Invalid configuration",
-    "Simulation n-aire → binaire": "N-ary → binary simulation",
-    "Simulation n-aire → binaire terminée": "N-ary → binary simulation complete",
-    "Conversion n-aire → binaire": "N-ary → binary conversion",
-    "Diagnostic complet de l'arbre": "Complete tree diagnostics", "Les cinq parcours": "The five traversals",
-    "Insertion dans un ABR": "BST insertion", "Suppression dans un ABR": "BST deletion",
-    "Suppression d'un sous-arbre": "Subtree deletion", "ABR équilibré": "Balanced BST",
-    "Arbre d'expression": "Expression tree", "Arbre rouge-noir construit": "Red-black tree created",
-    "Calcul de l’expression": "Expression evaluation", "Vérification des invariants": "Invariant check",
-    "Vérifier les invariants ABR / rouge-noir": "Check BST / red-black invariants",
-    "Somme": "Sum", "Moyenne": "Average", "Minimum": "Minimum", "Maximum": "Maximum",
-    "Nombre de nœuds": "Node count", "Nombre de feuilles": "Leaf count", "Nœuds internes": "Internal nodes",
-    "Hauteur de l'arbre": "Tree height", "Largeur de l'arbre": "Tree width", "Nombre de valeurs paires": "Even values",
-    "Nombre de nombres premiers": "Prime numbers", "Valeurs paires": "Even values", "Nombres premiers": "Prime numbers",
-    "OUI ✓": "YES ✓", "NON ✗": "NO ✗", "TROUVÉ": "FOUND", "ABSENT": "NOT FOUND",
-    "Préfixe : —\nPostfixe : —": "Prefix: —\nPostfix: —", "Pile de calcul · bas → sommet": "Evaluation stack · bottom → top",
-    "Cliquez d'abord sur un nœud de l'arbre.": "Click a tree node first.",
-    "L'arbre est vide : construisez-en un d'abord.": "The tree is empty. Build one first.",
-    "Cliquez d'abord sur « Nouvelle question ».": "Click “New question” first.",
-    "Saisissez un nombre entier dans le champ « Valeur ».": "Enter an integer in the Value field.",
-    "Saisissez un entier avant de placer un nœud.": "Enter an integer before placing a node.",
-    "Cette opération suppose un ABR (voir « Est-ce un ABR ? »).": "This operation requires a BST (see “Is this a BST?”).",
-    "Seul un ABR peut être rééquilibré par cette méthode.": "Only a BST can be rebalanced with this method.",
-    "Le nœud {p.valeur} a déjà un fils {cote.replace('droite', 'droit')}.": "Node {p.valeur} already has a {cote} child.",
-}
-
-_ENGLISH_WORDS = {
-    "procédure":"procedure", "début":"begin", "finsi":"endif", "alors":"then", "sinon":"else",
-    "retourner":"return", "répéter":"repeat", "jusqu’à":"until", "tant":"while", "pour":"for",
-    "chaque":"each", "racine":"root", "arbre":"tree", "arbres":"trees", "nœud":"node", "nœuds":"nodes",
-    "gauche":"left", "droite":"right", "droit":"right", "fils":"child", "enfant":"child", "enfants":"children",
-    "frère":"sibling", "frères":"siblings", "père":"parent", "valeur":"value", "valeurs":"values",
-    "hauteur":"height", "largeur":"width", "feuille":"leaf", "feuilles":"leaves", "interne":"internal",
-    "sommet":"top", "pile":"stack", "file":"queue", "vide":"empty", "complet":"complete",
-    "parfait":"perfect", "équilibré":"balanced", "dégénéré":"degenerate", "recherche":"search",
-    "chercher":"search", "rechercher":"search", "insertion":"insertion", "insérer":"insert", "inséré":"inserted",
-    "suppression":"deletion", "supprimer":"delete", "ajouter":"add", "ajouté":"added", "créer":"create",
-    "créé":"created", "modifier":"edit", "afficher":"display", "calculer":"calculate", "calcul":"calculation",
-    "vérifier":"check", "vérification":"check", "trouvé":"found", "absent":"not found", "visiter":"visit",
-    "visité":"visited", "parcouru":"traversed", "parcours":"traversal", "préfixé":"preorder", "infixé":"inorder",
-    "postfixé":"postorder", "inversé":"reverse", "largeur":"breadth-first", "sous-arbre":"subtree",
-    "successeur":"successor", "prédécesseur":"predecessor", "chemin":"path", "niveau":"level", "étape":"step",
-    "étapes":"steps", "nombre":"number", "somme":"sum", "moyenne":"average", "minimum":"minimum",
-    "maximum":"maximum", "pair":"even", "paire":"even", "impair":"odd", "premier":"prime",
-    "premiers":"primes", "occurrence":"occurrence", "occurrences":"occurrences", "multiple":"multiple",
-    "multiples":"multiples", "supérieur":"greater", "inférieur":"less", "égal":"equal", "différent":"different",
-    "vide":"empty", "erreur":"error", "valide":"valid", "invalide":"invalid", "résultat":"result",
-    "exemple":"example", "exemples":"examples", "animation":"animation", "animé":"animated", "entrée":"input",
-    "sortie":"output", "valider":"validate", "annuler":"undo", "rétablir":"redo", "nouveau":"new",
-    "nouvelle":"new", "suivant":"next", "précédent":"previous", "droit":"right", "pointeur":"pointer",
-    "pointeurs":"pointers", "adresse":"address", "adresses":"addresses", "mémoire":"memory", "structure":"structure",
-    "parenthèses":"parentheses", "enfants":"children", "notation":"notation", "conversion":"conversion",
-    "équation":"equation", "expression":"expression", "arête":"edge", "arêtes":"edges", "lien":"link",
-    "liens":"links", "nulle":"null", "nul":"null", "comparer":"compare", "comparaison":"comparison",
-    "couleur":"color", "feuille":"leaf", "chemin":"path", "temps":"time", "état":"state",
-    "oui":"yes", "non":"no", "vrai":"true", "faux":"false", "si":"if", "fin":"end",
-    "procedure":"procedure", "définir":"define", "donnée":"data", "données":"data", "arête":"edge",
-}
-_ENGLISH_WORD_RE = re.compile(r"(?<!\w)([A-Za-zÀ-ÖØ-öø-ÿŒœ’'-]+)(?!\w)")
-
-def _english_text(value):
-    if not isinstance(value, str):
-        return value
-    result = value
-    for french, english in sorted(_ENGLISH_PHRASES.items(), key=lambda item: len(item[0]), reverse=True):
-        result = result.replace(french, english)
-    def word(match):
-        original = match.group(0)
-        translated = _ENGLISH_WORDS.get(original.lower())
-        if translated is None:
-            return original
-        if original.isupper():
-            return translated.upper()
-        if original[:1].isupper():
-            return translated[:1].upper() + translated[1:]
-        return translated
-    return _ENGLISH_WORD_RE.sub(word, result)
-
-def _english_side(value):
-    return {"gauche": "left", "droite": "right"}.get(value, value)
-
-def _french_side(value):
-    return {"left": "gauche", "right": "droite"}.get(value, value)
-
-def install_english():
-    """Translate visible Tk text while keeping the original algorithm data intact."""
-    def wrap_configure(cls):
-        original = cls.configure
-        def configure(widget, cnf=None, **kw):
-            if isinstance(cnf, dict):
-                cnf = dict(cnf)
-                for key in ("text", "label"):
-                    if key in cnf:
-                        cnf[key] = _english_text(cnf[key])
-                if "values" in cnf:
-                    cnf["values"] = tuple(_english_text(v) for v in cnf["values"])
-            for key in ("text", "label"):
-                if key in kw:
-                    kw[key] = _english_text(kw[key])
-            if "values" in kw:
-                kw["values"] = tuple(_english_text(v) for v in kw["values"])
-            return original(widget, cnf, **kw)
-        cls.configure = configure
-        cls.config = configure
-    for cls in (tk.Misc, ttk.Widget):
-        wrap_configure(cls)
-
-    for method_name in ("add_command", "add_cascade", "add_checkbutton", "add_radiobutton"):
-        original = getattr(tk.Menu, method_name)
-        def make_menu_wrapper(original_method):
-            def wrapped(menu, *args, **kwargs):
-                if "label" in kwargs:
-                    kwargs["label"] = _english_text(kwargs["label"])
-                return original_method(menu, *args, **kwargs)
-            return wrapped
-        setattr(tk.Menu, method_name, make_menu_wrapper(original))
-
-    original_add = ttk.Notebook.add
-    def notebook_add(notebook, child, **kwargs):
-        if "text" in kwargs:
-            kwargs["text"] = _english_text(kwargs["text"])
-        return original_add(notebook, child, **kwargs)
-    ttk.Notebook.add = notebook_add
-
-    original_text = tk.Canvas.create_text
-    def canvas_text(canvas, *args, **kwargs):
-        if "text" in kwargs:
-            app = getattr(canvas, "_treelab_app", None)
-            value = kwargs["text"]
-            node_values = {str(n.valeur) for n in noeuds(app.racine)} if app is not None else set()
-            if str(value) not in node_values:
-                kwargs["text"] = _english_text(value)
-        return original_text(canvas, *args, **kwargs)
-    tk.Canvas.create_text = canvas_text
-
-    original_title = tk.Wm.wm_title
-    def wm_title(window, string=None):
-        if isinstance(string, str):
-            string = _english_text(string)
-        return original_title(window, string)
-    tk.Wm.wm_title = wm_title
-
-    for name in ("showinfo", "showwarning", "showerror"):
-        original = getattr(messagebox, name)
-        def make_message_wrapper(original_method):
-            def wrapped(*args, **kwargs):
-                args = tuple(_english_text(v) if isinstance(v, str) else v for v in args)
-                for key in ("title", "message"):
-                    if key in kwargs:
-                        kwargs[key] = _english_text(kwargs[key])
-                return original_method(*args, **kwargs)
-            return wrapped
-        setattr(messagebox, name, make_message_wrapper(original))
-
-    for name in ("askopenfilename", "asksaveasfilename"):
-        original = getattr(filedialog, name)
-        def make_dialog_wrapper(original_method):
-            def wrapped(*args, **kwargs):
-                if "title" in kwargs:
-                    kwargs["title"] = _english_text(kwargs["title"])
-                if "filetypes" in kwargs:
-                    kwargs["filetypes"] = tuple((_english_text(label), pattern)
-                                                for label, pattern in kwargs["filetypes"])
-                return original_method(*args, **kwargs)
-            return wrapped
-        setattr(filedialog, name, make_dialog_wrapper(original))
-
-
 if __name__ == "__main__":
-    install_english()
     Application().mainloop()
+
 
 
 
