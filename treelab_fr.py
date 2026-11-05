@@ -179,11 +179,13 @@ def arbre_expression(expression):
     return pile[0]
 
 
-def texte_notations(notation, racine, enfants):
+def texte_notations(notation, racine, enfants, liens=None):
     """Construit le texte des cinq notations à partir de la table parent -> enfants.
 
     notation est la notation parent-enfants brute, racine le nom de la racine et
     enfants un dictionnaire {nom: [noms des fils]} dont l'ordre est conservé.
+    liens, facultatif, est utilisé pour un vrai arbre binaire : {nom: (gauche, droite)}
+    avec None pour un lien vide, afin de ne pas confondre fils gauche et fils droit.
     """
     def imbrique(nom):
         fils = enfants[nom]
@@ -204,14 +206,27 @@ def texte_notations(notation, racine, enfants):
             dessiner_indente(fils_nom, suite, i == len(fils) - 1)
     dessiner_indente(racine, racine_locale=True)
     lignes += ["", "4) LISTE DES ENFANTS"]
+    if liens is not None:
+        for nom in enfants:
+            g, d = liens[nom]
+            morceaux = ([f"{g} (gauche)"] if g else []) + ([f"{d} (droite)"] if d else [])
+            lignes.append(f"{nom} : {', '.join(morceaux) if morceaux else 'aucun'}")
+        lignes += ["", "5) CODAGE BINAIRE (liens gauche / droite de l'arbre)"]
+        for nom in enfants:
+            g, d = liens[nom]
+            lignes.append(f"{nom} : gauche = {g or 'NULL'}, droite = {d or 'NULL'}")
+        return "\n".join(lignes)
     for nom, fils in enfants.items():
         lignes.append(f"{nom} : {', '.join(fils) if fils else 'aucun'}")
     lignes += ["", "5) CODAGE BINAIRE (fils gauche / frère droit)"]
+    # Frère suivant de chaque nœud : c'est lui que pointe le lien « droite ».
+    frere_suivant = {racine: "NULL"}
+    for fils in enfants.values():
+        for i, f in enumerate(fils):
+            frere_suivant[f] = fils[i + 1] if i + 1 < len(fils) else "NULL"
     for nom, fils in enfants.items():
         gauche = fils[0] if fils else "NULL"
-        lignes.append(f"{nom} : gauche = {gauche}")
-        for i in range(1, len(fils)):
-            lignes.append(f"{fils[i]} : droite = frère {fils[i - 1]}")
+        lignes.append(f"{nom} : gauche = {gauche}, droite = {frere_suivant[nom]}")
     return "\n".join(lignes)
 
 
@@ -242,7 +257,9 @@ def notations_depuis_arbre_binaire(r):
     morceaux = [f"{noms[n]}({','.join(noms[f] for f in (n.gauche, n.droite) if f is not None)})"
                 for n in ns if nb_fils(n) > 0]
     notation = "; ".join(morceaux) if morceaux else noms[r]
-    texte = texte_notations(notation, noms[r], enfants)
+    liens = {noms[n]: (noms[n.gauche] if n.gauche is not None else None,
+                       noms[n.droite] if n.droite is not None else None) for n in ns}
+    texte = texte_notations(notation, noms[r], enfants, liens)
     if any(c > 1 for c in freq.values()):
         texte += ("\n\nNote : certaines valeurs apparaissent plusieurs fois ; elles sont "
                   "numérotées (_1, _2...) pour distinguer les nœuds.")
@@ -1804,6 +1821,30 @@ COULEURS = {
     "bad": "#FF8A8A", "path": "#C8A2F2", "enter": "#FFE0B2",
 }
 C_ENTETE = "#352817"
+# Barre de navigation latérale
+NAV_FOND = "#2B2116"
+NAV_SURVOL = "#43331E"
+NAV_ACTIF = "#5B4627"
+NAV_TEXTE = "#D9CBA6"
+NAV_ENTETE_TXT = "#9C8A63"
+NAV_LARGEUR = 150
+NAV_LARGEUR_REDUITE = 50
+# Sections de la navigation : (titre de section, [(titre de page, icône, libellé court)])
+NAV_GROUPES = [
+    ("CONSTRUIRE", [("Arbre", "🌳", "Arbre"),
+                    ("Construction pas à pas", "🛠", "Construction")]),
+    ("EXPLORER", [("Parcours", "🧭", "Parcours"),
+                  ("Mesures", "📏", "Mesures"),
+                  ("ABR", "🔍", "ABR")]),
+    ("CONVERTIR", [("N-aire → binaire", "🔀", "N-aire → binaire"),
+                   ("Notations", "📝", "Notations"),
+                   ("Calculatrice polonaise", "🧮", "Calc. polonaise")]),
+    ("APPRENDRE", [("Ateliers", "🎓", "Ateliers"),
+                   ("Tests", "✅", "Tests"),
+                   ("Quiz", "❓", "Quiz"),
+                   ("QCM", "☑", "QCM"),
+                   ("Défis & Pourquoi", "💡", "Défis & Pourquoi")]),
+]
 C_NORMAL = "#A8D4FF"
 C_FEUILLE = "#F4B6D2"
 C_COURANT = "#FF9F1C"
@@ -1950,14 +1991,17 @@ class Application(tk.Tk):
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure(".", background="#F7F2E7", foreground=C_ENCRE, font=("Arial", 10))
+        familles = set(tkfont.families(self))
+        self.police = next((f for f in ("Segoe UI", "Helvetica Neue", "Ubuntu", "Arial")
+                            if f in familles), "Arial")
+        style.configure(".", background="#F7F2E7", foreground=C_ENCRE, font=(self.police, 10))
         style.configure("TFrame", background="#F7F2E7")
         style.configure("TLabel", background="#F7F2E7", foreground=C_ENCRE)
         style.configure("Titre.TLabel", background="#F7F2E7", foreground="#805B12",
                         font=("Arial", 11, "bold"))
-        style.configure("TButton", padding=(9, 5), background="#E8D39A", foreground="#352817",
-                        bordercolor="#C49A3A", focusthickness=2, focuscolor=C_OR)
-        style.map("TButton", background=[("active", "#D9BC72"), ("pressed", "#C49A3A")],
+        style.configure("TButton", padding=(10, 6), background="#EFE3C2", foreground="#352817",
+                        bordercolor="#D8C89F", relief="flat", focusthickness=1, focuscolor=C_OR)
+        style.map("TButton", background=[("active", "#E3CD8F"), ("pressed", "#C49A3A")],
                   foreground=[("pressed", "#FFFFFF")])
         style.configure("TNotebook", background="#F7F2E7", borderwidth=0)
         style.configure("TNotebook.Tab", padding=(11, 7), background="#EAE2D1",
@@ -1968,16 +2012,17 @@ class Application(tk.Tk):
         style.configure("TLabelframe.Label", background="#F7F2E7", foreground="#805B12",
                         font=("Arial", 10, "bold"))
         style.configure("TEntry", fieldbackground="#FFFEFA", foreground=C_ENCRE,
-                        bordercolor="#D8C89F")
+                        bordercolor="#D8C89F", padding=4)
         style.configure("TCheckbutton", background="#F7F2E7", foreground=C_ENCRE)
         style.map("TCheckbutton", background=[("active", "#F7F2E7")])
 
-        self.columnconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
         # ----- bandeau TreeLab
         entete = tk.Frame(self, bg=C_ENTETE)
         entete.grid(row=0, column=0, columnspan=2, sticky="ew")
+        tk.Frame(entete, height=3, bg=C_OR).pack(side="bottom", fill="x")
         self.logo_img = self.charger_logo()
         if self.logo_img is not None:
             tk.Label(entete, image=self.logo_img, bg=C_ENTETE).pack(side="left", padx=(8, 6), pady=4)
@@ -1986,9 +2031,9 @@ class Application(tk.Tk):
                 side="left", padx=(12, 6), pady=4)
         bloc = tk.Frame(entete, bg=C_ENTETE)
         bloc.pack(side="left", padx=6)
-        tk.Label(bloc, text="TreeLab", font=("Arial", 24, "bold"), bg=C_ENTETE,
+        tk.Label(bloc, text="TreeLab", font=(self.police, 18, "bold"), bg=C_ENTETE,
                  fg="white").pack(anchor="w")
-        tk.Label(bloc, text="by Nadir BOUCHAMA", font=("Arial", 11, "italic"), bg=C_ENTETE,
+        tk.Label(bloc, text="by Nadir BOUCHAMA", font=(self.police, 9, "italic"), bg=C_ENTETE,
                  fg="#E8D39A").pack(anchor="w")
         tk.Button(entete, text="À propos", command=self.a_propos, bg="#E8D39A", fg="#352817",
                   activebackground="#D9BC72", relief="flat", padx=10, pady=3,
@@ -1997,10 +2042,27 @@ class Application(tk.Tk):
                  bg=C_ENTETE, fg="#E8D39A").pack(side="right", padx=14)
 
         # ----- colonne gauche
-        gauche = ttk.Frame(self, padding=6)
-        gauche.grid(row=1, column=0, sticky="ns")
-        self.nb_gauche = ttk.Notebook(gauche, width=390, height=500)
-        self.nb_gauche.pack(fill="both", expand=True)
+        # Séparateur vertical glissable entre le panneau de gauche (commandes)
+        # et la partie droite (arbre, algorithme, résultats).
+        principal = tk.PanedWindow(self, orient="horizontal", sashwidth=9, sashrelief="raised",
+                                   sashcursor="sb_h_double_arrow", opaqueresize=True,
+                                   bg="#C49A3A", bd=0)
+        principal.grid(row=1, column=0, columnspan=2, sticky="nsew")
+
+        self.principal = principal
+        self.pages, self.page_active = {}, None
+        gauche = ttk.Frame(principal)
+        principal.add(gauche, stretch="never", minsize=300, width=NAV_LARGEUR + 395)
+        nav = tk.Frame(gauche, bg=NAV_FOND, width=NAV_LARGEUR)
+        nav.pack(side="left", fill="y")
+        nav.pack_propagate(False)
+        zone = ttk.Frame(gauche, padding=6)
+        zone.pack(side="left", fill="both", expand=True)
+        self.zone_pages = tk.Frame(zone, width=380, height=500, bg="#F7F2E7")
+        self.zone_pages.pack(fill="both", expand=True)
+        self.zone_pages.grid_propagate(False)
+        self.zone_pages.columnconfigure(0, weight=1)
+        self.zone_pages.rowconfigure(0, weight=1)
         self.onglet_arbre()
         self.onglet_construction()
         self.onglet_parcours()
@@ -2013,11 +2075,13 @@ class Application(tk.Tk):
         self.onglet_conversion_naire()
         self.onglet_notations()
         self.onglet_calculatrice()
-        self.panneau_animation(gauche)
+        self.panneau_animation(zone)
+        self.construire_navigation(nav)
+        self.afficher_page("Arbre")
 
         # ----- partie droite
-        droite = ttk.Frame(self)
-        droite.grid(row=1, column=1, sticky="nsew")
+        droite = ttk.Frame(principal)
+        principal.add(droite, stretch="always", minsize=450)
         # PanedWindow classique : séparateur épais, facile à saisir et à déplacer.
         paned = tk.PanedWindow(droite, orient="vertical", sashwidth=9, sashrelief="raised",
                                sashcursor="sb_v_double_arrow", opaqueresize=True,
@@ -2196,11 +2260,115 @@ class Application(tk.Tk):
             parent.columnconfigure(c, weight=1)
 
     def nouvel_onglet(self, titre):
-        """Ajoute un onglet de commandes avec une colonne extensible."""
-        f = ttk.Frame(self.nb_gauche, padding=6)
-        self.nb_gauche.add(f, text=titre)
+        """Crée une page de commandes (affichée par la barre latérale) à colonne extensible."""
+        f = ttk.Frame(self.zone_pages, padding=6)
+        f.grid(row=0, column=0, sticky="nsew")
+        f.grid_remove()
         f.columnconfigure(0, weight=1)
+        self.pages[titre] = f
         return f
+
+    def construire_navigation(self, nav):
+        """Barre latérale : pages regroupées par section, icône + libellé, repliable."""
+        self.nav = nav
+        self.nav_replie = False
+        self.nav_lignes = {}      # titre -> (ligne, barre, libellé, icône, texte court)
+        self.nav_entetes = []     # (étiquette, texte de la section)
+        self.nav_infobulle = None
+        bascule = tk.Label(nav, text="☰  Menu", font=(self.police, 11, "bold"), bg=NAV_FOND,
+                           fg="#E8D39A", anchor="w", padx=14, pady=10, cursor="hand2")
+        bascule.pack(fill="x")
+        bascule.bind("<Button-1>", lambda _e: self.basculer_navigation())
+        self.nav_bascule = bascule
+        listees = set()
+        for groupe, elements in NAV_GROUPES:
+            presents = [e for e in elements if e[0] in self.pages]
+            if not presents:
+                continue
+            ent = tk.Label(nav, text=groupe, font=(self.police, 8, "bold"), bg=NAV_FOND,
+                           fg=NAV_ENTETE_TXT, anchor="w", padx=14)
+            ent.pack(fill="x", pady=(12, 3))
+            self.nav_entetes.append((ent, groupe))
+            for titre, icone, court in presents:
+                self._ajouter_ligne_nav(titre, icone, court)
+                listees.add(titre)
+        for titre in self.pages:          # page non prévue dans NAV_GROUPES : ajoutée à la fin
+            if titre not in listees:
+                self._ajouter_ligne_nav(titre, "•", titre)
+
+    def _ajouter_ligne_nav(self, titre, icone, court):
+        """Ajoute une entrée cliquable à la barre latérale."""
+        ligne = tk.Frame(self.nav, bg=NAV_FOND, cursor="hand2")
+        ligne.pack(fill="x")
+        barre = tk.Frame(ligne, width=4, bg=NAV_FOND)
+        barre.pack(side="left", fill="y")
+        lbl = tk.Label(ligne, text=f"{icone}  {court}", font=(self.police, 10), bg=NAV_FOND,
+                       fg=NAV_TEXTE, anchor="w", padx=10, pady=7)
+        lbl.pack(side="left", fill="x", expand=True)
+        for w in (ligne, barre, lbl):
+            w.bind("<Button-1>", lambda _e, t=titre: self.afficher_page(t))
+            w.bind("<Enter>", lambda _e, t=titre: self._survol_nav(t, True))
+            w.bind("<Leave>", lambda _e, t=titre: self._survol_nav(t, False))
+        self.nav_lignes[titre] = (ligne, barre, lbl, icone, court)
+
+    def _colorier_nav(self, titre, survol=False):
+        """Applique la couleur normale, survolée ou active à une entrée de la barre."""
+        ligne, barre, lbl, _icone, _court = self.nav_lignes[titre]
+        actif = titre == self.page_active
+        fond = NAV_ACTIF if actif else (NAV_SURVOL if survol else NAV_FOND)
+        ligne.config(bg=fond)
+        lbl.config(bg=fond, fg="white" if actif else NAV_TEXTE)
+        barre.config(bg=C_OR if actif else fond)
+
+    def _survol_nav(self, titre, entre):
+        """Surbrillance au survol ; infobulle avec le nom complet quand la barre est repliée."""
+        self._colorier_nav(titre, entre)
+        if self.nav_infobulle is not None:
+            self.nav_infobulle.destroy()
+            self.nav_infobulle = None
+        if entre and self.nav_replie:
+            ligne = self.nav_lignes[titre][0]
+            tip = tk.Toplevel(self)
+            tip.wm_overrideredirect(True)
+            tk.Label(tip, text=titre, bg="#FFFBE6", fg=C_ENCRE, relief="solid", bd=1,
+                     padx=6, pady=2, font=(self.police, 9)).pack()
+            tip.wm_geometry(f"+{ligne.winfo_rootx() + self.nav.winfo_width() + 4}"
+                            f"+{ligne.winfo_rooty() + 6}")
+            self.nav_infobulle = tip
+
+    def afficher_page(self, titre):
+        """Affiche la page de commandes choisie et met la barre latérale à jour."""
+        if titre not in self.pages:
+            return
+        for nom, page in self.pages.items():
+            if nom != titre:
+                page.grid_remove()
+        self.pages[titre].grid()
+        ancienne, self.page_active = self.page_active, titre
+        if ancienne in self.nav_lignes:
+            self._colorier_nav(ancienne)
+        self._colorier_nav(titre)
+
+    def basculer_navigation(self):
+        """Replie la barre latérale en icônes (ou la redéploie) et déplace le séparateur."""
+        ancien = NAV_LARGEUR_REDUITE if self.nav_replie else NAV_LARGEUR
+        self.nav_replie = not self.nav_replie
+        nouveau = NAV_LARGEUR_REDUITE if self.nav_replie else NAV_LARGEUR
+        self.nav.config(width=nouveau)
+        self.nav_bascule.config(text="☰" if self.nav_replie else "☰  Menu",
+                                anchor="center" if self.nav_replie else "w",
+                                padx=0 if self.nav_replie else 14)
+        for _ligne, _barre, lbl, icone, court in self.nav_lignes.values():
+            lbl.config(text=icone if self.nav_replie else f"{icone}  {court}",
+                       anchor="center" if self.nav_replie else "w",
+                       padx=0 if self.nav_replie else 10)
+        for ent, groupe in self.nav_entetes:
+            ent.config(text="" if self.nav_replie else groupe)
+        try:
+            x, y = self.principal.sash_coord(0)
+            self.principal.sash_place(0, x + nouveau - ancien, y)
+        except tk.TclError:
+            pass
 
     # ----- onglet « Arbre »
     def onglet_arbre(self):
@@ -2479,7 +2647,7 @@ class Application(tk.Tk):
             "structures de données. Elle permet de construire un arbre, de lancer une "
             "opération et d’observer son effet sur les nœuds, les liens et les résultats "
             "affichés.")).pack(padx=24)
-        tk.Label(fen, text="Novembre 2027", bg="#F7F2E7", fg="#5C5140",
+        tk.Label(fen, text="Novembre 2026", bg="#F7F2E7", fg="#5C5140",
                  font=("Arial", 10)).pack(pady=(10, 0))
         mail = tk.Label(fen, text="nadir.bouchama@gmail.com", bg="#F7F2E7", fg="#175CD3",
                         font=("Arial", 10, "underline"), cursor="hand2")
