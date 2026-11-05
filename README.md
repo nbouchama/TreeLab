@@ -74,5 +74,3 @@ A(B,C,D); B(E,F); C(G)
 Dans cet exemple, A est la racine ; B, C et D sont ses enfants. Le simulateur montre comment représenter ces relations dans un arbre binaire.
 Public visé
 TreeLab est conçu comme un support d’apprentissage et de démonstration pour les cours d’algorithmique et de structures de données, en particulier pour l’étude des arbres, des parcours et des opérations sur les arbres binaires.
-
-Créé par Nadir BOUCHAMA pour l’enseignement des algorithmes et des structures de données (ISIL 2).
