@@ -266,6 +266,446 @@ def notations_depuis_arbre_binaire(r):
     return texte
 
 
+# ----------------------------------------------------------------------
+#  CONVERTISSEUR DE NOTATIONS D'ARBRES
+# ----------------------------------------------------------------------
+# Représentation interne : (racine, enfants) où enfants est un dictionnaire
+# {nom: [fils...]}.  Pour un arbre binaire, chaque liste vaut [gauche, droite]
+# et None marque un fils absent ; pour un arbre général, la liste contient
+# simplement les fils dans l'ordre.
+
+FORMATS_NOTATION = [
+    ("pe", "Parent-enfants   A(B,C); B(E,T)"),
+    ("imb", "Parenthésée imbriquée   A(B(E,T),C)"),
+    ("ind", "Indentée (arborescence)"),
+    ("liste", "Liste des enfants   A : B, C"),
+    ("bin", "Codage binaire (gauche / droite)"),
+]
+LIBELLE_AUTO = "Détection automatique"
+LIBELLE_TOUTES = "Toutes les notations"
+SYMBOLE_VIDE = "∅"
+_VIDES = {"∅", "ø", "null", "nil", "_", "-"}
+
+
+def _est_vide(texte, binaire):
+    """Vrai si texte désigne un fils absent (uniquement pour un arbre binaire)."""
+    return binaire and texte.strip().lower() in _VIDES
+
+
+def _construire_fils(nom, entrees, binaire):
+    """Transforme [(fils ou None, étiquette)] en liste de fils du nœud nom."""
+    if not binaire:
+        return [x for x, _ in entrees]
+    if len(entrees) > 2:
+        raise ValueError(f"Le nœud {nom} a {len(entrees)} fils : "
+                         "un arbre binaire en admet 2 au maximum.")
+    fils = [None, None]
+    if any(t for _, t in entrees):
+        for x, t in entrees:
+            if t is None:
+                raise ValueError(f"Le nœud {nom} mélange des fils avec et sans (gauche)/(droite).")
+            k = 0 if t == "gauche" else 1
+            if fils[k] is not None:
+                raise ValueError(f"Le nœud {nom} a deux fils {t}s.")
+            fils[k] = x
+    else:
+        for i, (x, _) in enumerate(entrees):
+            fils[i] = x
+    return fils
+
+
+def _completer_feuilles(enfants, binaire):
+    """Ajoute les nœuds cités comme fils mais jamais définis (ce sont des feuilles)."""
+    for liste in list(enfants.values()):
+        for f in liste:
+            if f is not None and f not in enfants:
+                enfants[f] = [None, None] if binaire else []
+
+
+def _racine_unique(enfants):
+    fils = {f for liste in enfants.values() for f in liste if f is not None}
+    racines = [n for n in enfants if n not in fils]
+    if not racines:
+        raise ValueError("Aucune racine trouvée : la notation contient un cycle.")
+    if len(racines) > 1:
+        raise ValueError("Plusieurs racines possibles : " + ", ".join(racines) + ".")
+    return racines[0]
+
+
+def _valider_arbre(racine, enfants):
+    """Refuse les cycles, les nœuds à plusieurs parents et les nœuds inaccessibles."""
+    vus = set()
+
+    def visiter(nom, chemin):
+        if nom in chemin:
+            raise ValueError(f"Cycle détecté au nœud {nom}.")
+        if nom in vus:
+            raise ValueError(f"Le nœud {nom} a plusieurs parents.")
+        vus.add(nom)
+        for f in enfants[nom]:
+            if f is not None:
+                visiter(f, chemin | {nom})
+    visiter(racine, frozenset())
+    if len(vus) != len(enfants):
+        raise ValueError("Nœuds inaccessibles depuis la racine : "
+                         + ", ".join(n for n in enfants if n not in vus) + ".")
+
+
+# ----- lecture (texte -> (racine, enfants))
+
+def _lire_pe(texte, binaire):
+    enfants, definis, racine = {}, set(), None
+    for morceau in texte.replace("\n", ";").split(";"):
+        morceau = morceau.strip()
+        if not morceau:
+            continue
+        m = re.fullmatch(r"([^()\s,]+)\s*(?:\(([^()]*)\))?", morceau)
+        if not m:
+            raise ValueError(f"Notation invalide : {morceau}")
+        nom, liste = m.group(1), m.group(2)
+        if nom in definis:
+            raise ValueError(f"Le nœud {nom} est défini plusieurs fois.")
+        definis.add(nom)
+        racine = racine or nom
+        entrees = []
+        if liste is not None and liste.strip():
+            for x in liste.split(","):
+                if not x.strip():
+                    raise ValueError(f"Liste d'enfants incomplète pour {nom}.")
+                entrees.append((None if _est_vide(x, binaire) else x.strip(), None))
+        enfants[nom] = _construire_fils(nom, entrees, binaire)
+    if racine is None:
+        raise ValueError("Saisissez une notation d'arbre.")
+    _completer_feuilles(enfants, binaire)
+    return racine, enfants
+
+
+def _lire_imb(texte, binaire):
+    toks = re.findall(r"[(),]|[^()\s,]+", texte)
+    pos = [0]
+    enfants = {}
+
+    def peek():
+        return toks[pos[0]] if pos[0] < len(toks) else None
+
+    def noeud():
+        t = peek()
+        if t is None or t in ("(", ")", ","):
+            raise ValueError("Nom de nœud attendu" + (f" avant « {t} »." if t else " en fin de texte."))
+        pos[0] += 1
+        entrees = []
+        if peek() == "(":
+            pos[0] += 1
+            if peek() == ")":
+                pos[0] += 1
+            else:
+                while True:
+                    t2 = peek()
+                    if t2 is not None and _est_vide(t2, binaire):
+                        pos[0] += 1
+                        entrees.append((None, None))
+                    else:
+                        entrees.append((noeud(), None))
+                    sep = peek()
+                    if sep == ",":
+                        pos[0] += 1
+                    elif sep == ")":
+                        pos[0] += 1
+                        break
+                    else:
+                        raise ValueError("« , » ou « ) » attendu après un fils de " + t + ".")
+        if t in enfants:
+            raise ValueError(f"Le nœud {t} apparaît plusieurs fois.")
+        enfants[t] = _construire_fils(t, entrees, binaire)
+        return t
+
+    racine = noeud()
+    if pos[0] < len(toks):
+        raise ValueError(f"Texte inattendu après l'arbre : « {toks[pos[0]]} ».")
+    return racine, enfants
+
+
+_PREFIXE_INDENT = re.compile(r"^[ │|]*(?:[├└`\\][─\-]*|[─\-]{2,})?[ ]*")
+
+
+def _lire_ind(texte, binaire):
+    lignes = [l.rstrip() for l in texte.replace("\t", "    ").splitlines() if l.strip()]
+    entrees_par, pile, racine = {}, [], None
+    for l in lignes:
+        col = _PREFIXE_INDENT.match(l).end()
+        nom = l[col:].strip()
+        if not nom or re.search(r"\s", nom):
+            raise ValueError(f"Nom de nœud invalide dans la ligne : « {l.strip()} » "
+                             "(un nom ne contient pas d'espace).")
+        vide = _est_vide(nom, binaire)
+        while pile and pile[-1][0] >= col:
+            pile.pop()
+        if not pile:
+            if racine is not None:
+                raise ValueError(f"Plusieurs racines : « {nom} » n'est pas indenté sous la racine.")
+            if vide:
+                raise ValueError("La racine ne peut pas être vide.")
+            racine = nom
+        else:
+            entrees_par[pile[-1][1]].append((None if vide else nom, None))
+        if not vide:
+            if nom in entrees_par:
+                raise ValueError(f"Le nœud {nom} apparaît plusieurs fois.")
+            entrees_par[nom] = []
+            pile.append((col, nom))
+    if racine is None:
+        raise ValueError("Saisissez une notation d'arbre.")
+    return racine, {n: _construire_fils(n, e, binaire) for n, e in entrees_par.items()}
+
+
+def _lire_liste(texte, binaire):
+    enfants = {}
+    for l in texte.splitlines():
+        if not l.strip():
+            continue
+        if ":" not in l:
+            raise ValueError(f"Ligne sans « : » : {l.strip()}")
+        nom, reste = (x.strip() for x in l.split(":", 1))
+        if not nom or re.search(r"\s", nom):
+            raise ValueError(f"Nom de nœud invalide : « {nom} ».")
+        if nom in enfants:
+            raise ValueError(f"Le nœud {nom} est défini plusieurs fois.")
+        entrees = []
+        if reste and reste.lower() not in ("aucun", "aucune", "vide", "feuille", "∅", "-", "—"):
+            for x in reste.split(","):
+                x = x.strip()
+                if not x:
+                    raise ValueError(f"Liste d'enfants incomplète pour {nom}.")
+                m = re.fullmatch(r"(\S+)\s*\((gauche|droite)\)", x)
+                tag = None
+                if m:
+                    x, tag = m.group(1), m.group(2)
+                entrees.append((None if _est_vide(x, binaire) else x, tag))
+        enfants[nom] = _construire_fils(nom, entrees, binaire)
+    if not enfants:
+        raise ValueError("Saisissez une notation d'arbre.")
+    _completer_feuilles(enfants, binaire)
+    return _racine_unique(enfants), enfants
+
+
+def _lire_bin(texte, binaire):
+    liens = {}
+    for l in texte.splitlines():
+        if not l.strip():
+            continue
+        m = re.fullmatch(r"\s*(\S+)\s*:\s*gauche\s*=\s*([^\s,]+)\s*,\s*droite\s*=\s*(\S+)\s*", l)
+        if not m:
+            raise ValueError(f"Ligne non reconnue (attendu « A : gauche = B, droite = NULL ») : {l.strip()}")
+        nom, g, d = m.groups()
+        if nom in liens:
+            raise ValueError(f"Le nœud {nom} est défini plusieurs fois.")
+        liens[nom] = tuple(None if x.lower() in _VIDES else x for x in (g, d))
+    if not liens:
+        raise ValueError("Saisissez une notation d'arbre.")
+    cites = [x for paire in liens.values() for x in paire if x is not None]
+    for x in cites:
+        if x not in liens:
+            raise ValueError(f"Le nœud {x} est cité mais n'a pas de ligne.")
+    doubles = {x for x in cites if cites.count(x) > 1}
+    if doubles:
+        raise ValueError("Nœud(s) pointé(s) plusieurs fois : " + ", ".join(sorted(doubles)) + ".")
+    racines = [n for n in liens if n not in cites]
+    if len(racines) != 1:
+        raise ValueError("Aucune racine unique trouvée." if not racines
+                         else "Plusieurs racines possibles : " + ", ".join(racines) + ".")
+    racine = racines[0]
+    if binaire:
+        return racine, {n: [g, d] for n, (g, d) in liens.items()}
+    if liens[racine][1] is not None:
+        raise ValueError("Dans le codage fils gauche / frère droit, la racine n'a pas de frère.")
+    enfants = {}
+    for n, (g, _) in liens.items():
+        fils, c = [], g
+        while c is not None:
+            if c in fils:
+                raise ValueError("Cycle dans les liens droite.")
+            fils.append(c)
+            c = liens[c][1]
+        enfants[n] = fils
+    return racine, enfants
+
+
+_PARSEURS = {"pe": _lire_pe, "imb": _lire_imb, "ind": _lire_ind,
+             "liste": _lire_liste, "bin": _lire_bin}
+
+
+def detecter_format_notation(texte):
+    """Devine la notation d'un texte : « pe », « imb », « ind », « liste » ou « bin »."""
+    t = texte.strip()
+    lignes = [l for l in t.splitlines() if l.strip()]
+    if re.search(r"gauche\s*=", t) and re.search(r"droite\s*=", t):
+        return "bin"
+    if lignes and all(":" in l for l in lignes):
+        return "liste"
+    if ";" in t:
+        return "pe"
+    if len(lignes) > 1 or re.search(r"[│├└]", t):
+        return "imb" if "(" in t else "ind"
+    if "(" in t:
+        prof = prof_max = 0
+        for ch in t:
+            if ch == "(":
+                prof += 1
+                prof_max = max(prof_max, prof)
+            elif ch == ")":
+                prof -= 1
+        return "imb" if prof_max >= 2 else "pe"
+    return "pe"
+
+
+# ----- écriture ((racine, enfants) -> texte)
+
+def _rogner(fils):
+    fils = list(fils)
+    while fils and fils[-1] is None:
+        fils.pop()
+    return fils
+
+
+def _ordre_prefixe(racine, enfants):
+    res = []
+
+    def rec(n):
+        res.append(n)
+        for f in enfants[n]:
+            if f is not None:
+                rec(f)
+    rec(racine)
+    return res
+
+
+def _ordre_largeur(racine, enfants):
+    ordre, i = [racine], 0
+    while i < len(ordre):
+        ordre.extend(f for f in enfants[ordre[i]] if f is not None)
+        i += 1
+    return ordre
+
+
+def _ecrire_pe(racine, enfants, binaire):
+    morceaux = []
+    for n in _ordre_prefixe(racine, enfants):
+        fils = _rogner(enfants[n])
+        if fils:
+            morceaux.append(f"{n}({','.join(SYMBOLE_VIDE if f is None else f for f in fils)})")
+    return "; ".join(morceaux) if morceaux else racine
+
+
+def _ecrire_imb(racine, enfants, binaire):
+    def rec(n):
+        fils = _rogner(enfants[n])
+        if not fils:
+            return n
+        return f"{n}({', '.join(SYMBOLE_VIDE if f is None else rec(f) for f in fils)})"
+    return rec(racine)
+
+
+def _ecrire_ind(racine, enfants, binaire):
+    lignes = [racine]
+
+    def rec(n, prefixe):
+        fils = _rogner(enfants[n])
+        for i, f in enumerate(fils):
+            dernier = i == len(fils) - 1
+            lignes.append(prefixe + ("└── " if dernier else "├── ")
+                          + (SYMBOLE_VIDE if f is None else f))
+            if f is not None:
+                rec(f, prefixe + ("    " if dernier else "│   "))
+    rec(racine, "")
+    return "\n".join(lignes)
+
+
+def _ecrire_liste(racine, enfants, binaire):
+    lignes = []
+    for n in _ordre_largeur(racine, enfants):
+        if binaire:
+            parts = [f"{f} ({'gauche' if i == 0 else 'droite'})"
+                     for i, f in enumerate(enfants[n]) if f is not None]
+        else:
+            parts = list(enfants[n])
+        lignes.append(f"{n} : {', '.join(parts) if parts else 'aucun'}")
+    return "\n".join(lignes)
+
+
+def _ecrire_bin(racine, enfants, binaire):
+    lignes = []
+    if binaire:
+        for n in _ordre_largeur(racine, enfants):
+            g, d = enfants[n]
+            lignes.append(f"{n} : gauche = {g or 'NULL'}, droite = {d or 'NULL'}")
+        return "\n".join(lignes)
+    frere = {racine: "NULL"}
+    for fils in enfants.values():
+        for i, f in enumerate(fils):
+            frere[f] = fils[i + 1] if i + 1 < len(fils) else "NULL"
+    for n in _ordre_largeur(racine, enfants):
+        fils = enfants[n]
+        lignes.append(f"{n} : gauche = {fils[0] if fils else 'NULL'}, droite = {frere[n]}")
+    return "\n".join(lignes)
+
+
+_ECRIVAINS = {"pe": _ecrire_pe, "imb": _ecrire_imb, "ind": _ecrire_ind,
+              "liste": _ecrire_liste, "bin": _ecrire_bin}
+
+
+def ecrire_notation(racine, enfants, binaire, cible):
+    """Écrit l'arbre dans la notation cible (« toutes » pour les cinq à la suite)."""
+    if cible != "toutes":
+        return _ECRIVAINS[cible](racine, enfants, binaire)
+    titres = ["1) NOTATION PARENT-ENFANTS", "2) NOTATION PARENTHÉSÉE IMBRIQUÉE",
+              "3) REPRÉSENTATION INDENTÉE", "4) LISTE DES ENFANTS",
+              "5) CODAGE BINAIRE (" + ("liens gauche / droite)" if binaire
+                                      else "fils gauche / frère droit)")]
+    return "\n\n".join(f"{t}\n{_ECRIVAINS[cle](racine, enfants, binaire)}"
+                       for t, (cle, _) in zip(titres, FORMATS_NOTATION))
+
+
+def convertir_notation(texte, source, cible, binaire=False):
+    """Convertit texte de la notation source vers cible ; renvoie (résultat, source utilisée).
+
+    source vaut « auto » pour détecter la notation ; ValueError décrit les erreurs.
+    """
+    # Texte collé depuis le panneau « Notations de l'arbre » : on garde la 1re section.
+    lignes, vu_titre = [], False
+    for l in texte.splitlines():
+        if re.match(r"\s*\d\)\s+[A-ZÀ-Ý]", l):          # titre « 2) NOTATION… »
+            if vu_titre and any(x.strip() for x in lignes):
+                break
+            vu_titre = True
+            continue
+        lignes.append(l)
+    texte = "\n".join(lignes)
+    if not texte.strip():
+        raise ValueError("Saisissez une notation à convertir.")
+    if source == "auto":
+        source = detecter_format_notation(texte)
+    racine, enfants = _PARSEURS[source](texte, binaire)
+    _valider_arbre(racine, enfants)
+    return ecrire_notation(racine, enfants, binaire, cible), source
+
+
+def arbre_binaire_vers_table(r):
+    """Convertit l'arbre dessiné en (racine, enfants) binaire ; doublons suffixés _1, _2…"""
+    ns = noeuds(r, "RGD")
+    freq, vus, noms = {}, {}, {}
+    for n in ns:
+        freq[str(n.valeur)] = freq.get(str(n.valeur), 0) + 1
+    for n in ns:
+        base = str(n.valeur)
+        if freq[base] > 1:
+            vus[base] = vus.get(base, 0) + 1
+            noms[n] = f"{base}_{vus[base]}"
+        else:
+            noms[n] = base
+    return noms[r], {noms[n]: [noms[n.gauche] if n.gauche is not None else None,
+                               noms[n.droite] if n.droite is not None else None] for n in ns}
+
+
 def code_structure_python(r):
     """Sérialise l'arbre en code Python recréant ses valeurs et ses liens."""
     lignes = ["class Noeud:", "    def __init__(self, valeur):", "        self.valeur = valeur",
@@ -344,6 +784,54 @@ def code_structure_java(r):
     return "\n".join(lignes) + "\n"
 
 
+def code_structure_json(r):
+    """Sérialise l'arbre en JSON imbriqué (valeur, gauche, droite)."""
+    def rec(n):
+        if n is None:
+            return None
+        return {"valeur": n.valeur, "gauche": rec(n.gauche), "droite": rec(n.droite)}
+    return json.dumps(rec(r), ensure_ascii=False, indent=2)
+
+
+def code_structure_pascal(r):
+    """Produit un programme Pascal qui alloue les nœuds et relie les pointeurs."""
+    lignes = ["program Arbre;", "", "type",
+              "  PNoeud = ^TNoeud;",
+              "  TNoeud = record",
+              "    valeur: string;",
+              "    gauche, droite: PNoeud;",
+              "  end;", "",
+              "function Creer(v: string): PNoeud;",
+              "var n: PNoeud;",
+              "begin",
+              "  New(n);",
+              "  n^.valeur := v;",
+              "  n^.gauche := nil;",
+              "  n^.droite := nil;",
+              "  Creer := n;",
+              "end;", ""]
+    if r is None:
+        return "\n".join(lignes + ["var racine: PNoeud;", "begin", "  racine := nil;", "end."])
+    ns = noeuds(r, "RGD")
+    ids = {n: f"n{i}" for i, n in enumerate(ns)}
+    lignes.append("var")
+    lignes.append("  racine: PNoeud;")
+    noms = [ids[n] for n in ns]
+    for i in range(0, len(noms), 8):
+        lignes.append("  " + ", ".join(noms[i:i + 8]) + ": PNoeud;")
+    lignes += ["", "begin"]
+    for n in ns:
+        valeur = str(n.valeur).replace("'", "''")
+        lignes.append(f"  {ids[n]} := Creer('{valeur}');")
+    for n in ns:
+        if n.gauche:
+            lignes.append(f"  {ids[n]}^.gauche := {ids[n.gauche]};")
+        if n.droite:
+            lignes.append(f"  {ids[n]}^.droite := {ids[n.droite]};")
+    lignes += [f"  racine := {ids[r]};", "end."]
+    return "\n".join(lignes) + "\n"
+
+
 class Ev:
     """Une étape prévue par un algorithme avant son animation.
 
@@ -351,9 +839,10 @@ class Ev:
     affiché dans la trace ; out ajoute éventuellement une valeur à la séquence.
     Les kinds call et return gèrent les cadres des appels récursifs.
     """
-    __slots__ = ("noeud", "kind", "msg", "out")
+    __slots__ = ("noeud", "kind", "msg", "out", "cote")
 
-    def __init__(self, noeud, kind, msg="", out=None):
+    def __init__(self, noeud, kind, msg="", out=None, cote=None):
+        self.cote = cote     # « gauche » / « droit » pour un sous-arbre vide (NIL)
         self.noeud = noeud   # nœud à mettre en évidence (ou None)
         self.kind = kind     # enter | visit | skip | found | bad | path | empty
         self.msg = msg       # ligne affichée dans la trace
@@ -1868,8 +2357,10 @@ class Application(tk.Tk):
         super().__init__()
         self.title("TreeLab by Nadir BOUCHAMA — Arbres binaires (Algorithmique ISIL 2)")
         self.configure(bg="#F7F2E7")
-        self.geometry("1400x880")
-        self.minsize(1120, 720)
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        larg, haut_f = min(1400, sw - 40), min(880, sh - 110)
+        self.geometry(f"{larg}x{haut_f}+{max(0, (sw - larg) // 2)}+{max(0, (sh - haut_f) // 2 - 25)}")
+        self.minsize(min(1000, larg), min(600, haut_f))
 
         # --- état de l'arbre
         self.racine = None
@@ -1898,6 +2389,9 @@ class Application(tk.Tk):
         # --- état de l'animation
         self.marques = {}
         self.courant = None
+        self.nils_vus = []        # sous-arbres vides rencontrés : [(parent, cote)]
+        self.nil_courant = None   # (parent, cote) de l'étape en cours
+        self.lbls_etape = []      # étiquettes « Étape i / n »
         self.events = []
         self.ev_i = 0
         self.appels_recursifs = []
@@ -1991,28 +2485,34 @@ class Application(tk.Tk):
             style.theme_use("clam")
         except tk.TclError:
             pass
+        for nom in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+            try:
+                tkfont.nametofont(nom).configure(size=9)
+            except tk.TclError:
+                pass
         familles = set(tkfont.families(self))
         self.police = next((f for f in ("Segoe UI", "Helvetica Neue", "Ubuntu", "Arial")
                             if f in familles), "Arial")
-        style.configure(".", background="#F7F2E7", foreground=C_ENCRE, font=(self.police, 10))
+        style.configure(".", background="#F7F2E7", foreground=C_ENCRE, font=(self.police, 9))
         style.configure("TFrame", background="#F7F2E7")
         style.configure("TLabel", background="#F7F2E7", foreground=C_ENCRE)
         style.configure("Titre.TLabel", background="#F7F2E7", foreground="#805B12",
-                        font=("Arial", 11, "bold"))
-        style.configure("TButton", padding=(10, 6), background="#EFE3C2", foreground="#352817",
+                        font=("Arial", 10, "bold"))
+        style.configure("TButton", padding=(8, 4), background="#EFE3C2", foreground="#352817",
                         bordercolor="#D8C89F", relief="flat", focusthickness=1, focuscolor=C_OR)
+        style.configure("Petit.TButton", padding=(5, 2))
         style.map("TButton", background=[("active", "#E3CD8F"), ("pressed", "#C49A3A")],
                   foreground=[("pressed", "#FFFFFF")])
         style.configure("TNotebook", background="#F7F2E7", borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(11, 7), background="#EAE2D1",
+        style.configure("TNotebook.Tab", padding=(8, 4), background="#EAE2D1",
                          foreground="#5C5140")
         style.map("TNotebook.Tab", background=[("selected", "#C49A3A"), ("active", "#F0E2BD")],
                   foreground=[("selected", "#FFFFFF")])
         style.configure("TLabelframe", background="#F7F2E7", bordercolor="#D8C89F")
         style.configure("TLabelframe.Label", background="#F7F2E7", foreground="#805B12",
-                        font=("Arial", 10, "bold"))
+                        font=("Arial", 9, "bold"))
         style.configure("TEntry", fieldbackground="#FFFEFA", foreground=C_ENCRE,
-                        bordercolor="#D8C89F", padding=4)
+                        bordercolor="#D8C89F", padding=3)
         style.configure("TCheckbutton", background="#F7F2E7", foreground=C_ENCRE)
         style.map("TCheckbutton", background=[("active", "#F7F2E7")])
 
@@ -2027,18 +2527,18 @@ class Application(tk.Tk):
         if self.logo_img is not None:
             tk.Label(entete, image=self.logo_img, bg=C_ENTETE).pack(side="left", padx=(8, 6), pady=4)
         else:
-            tk.Label(entete, text="🌳", font=("Arial", 26), bg=C_ENTETE, fg="white").pack(
+            tk.Label(entete, text="🌳", font=("Arial", 24), bg=C_ENTETE, fg="white").pack(
                 side="left", padx=(12, 6), pady=4)
         bloc = tk.Frame(entete, bg=C_ENTETE)
         bloc.pack(side="left", padx=6)
-        tk.Label(bloc, text="TreeLab", font=(self.police, 18, "bold"), bg=C_ENTETE,
+        tk.Label(bloc, text="TreeLab", font=(self.police, 16, "bold"), bg=C_ENTETE,
                  fg="white").pack(anchor="w")
         tk.Label(bloc, text="by Nadir BOUCHAMA", font=(self.police, 9, "italic"), bg=C_ENTETE,
                  fg="#E8D39A").pack(anchor="w")
         tk.Button(entete, text="À propos", command=self.a_propos, bg="#E8D39A", fg="#352817",
                   activebackground="#D9BC72", relief="flat", padx=10, pady=3,
                   cursor="hand2").pack(side="right", padx=(0, 14))
-        tk.Label(entete, text="Arbres binaires · Algorithmique ISIL 2", font=("Arial", 11),
+        tk.Label(entete, text="Arbres binaires · Algorithmique ISIL 2", font=("Arial", 10),
                  bg=C_ENTETE, fg="#E8D39A").pack(side="right", padx=14)
 
         # ----- colonne gauche
@@ -2051,6 +2551,7 @@ class Application(tk.Tk):
 
         self.principal = principal
         self.pages, self.page_active = {}, None
+        self.pages_canvas = {}
         gauche = ttk.Frame(principal)
         principal.add(gauche, stretch="never", minsize=300, width=NAV_LARGEUR + 395)
         nav = tk.Frame(gauche, bg=NAV_FOND, width=NAV_LARGEUR)
@@ -2076,6 +2577,7 @@ class Application(tk.Tk):
         self.onglet_notations()
         self.onglet_calculatrice()
         self.panneau_animation(zone)
+        self.bind("<F8>", lambda _ev: self.bouton_suivant())
         self.construire_navigation(nav)
         self.afficher_page("Arbre")
 
@@ -2092,31 +2594,32 @@ class Application(tk.Tk):
         paned.add(haut, stretch="always", minsize=160)
         barre = ttk.Frame(haut, padding=(6, 4))
         barre.pack(fill="x")
-        self.lbl_seq = ttk.Label(barre, text="", font=("Arial", 13, "bold"),
+        self.lbl_seq = ttk.Label(barre, text="", font=("Arial", 11, "bold"),
                                  foreground="#0B5394", wraplength=900)
         self.lbl_seq.pack(anchor="w")
+        barre.bind("<Configure>", lambda e: self.lbl_seq.configure(wraplength=max(200, e.width - 20)))
         outils = ttk.Frame(barre)
         outils.pack(anchor="e", pady=(2, 0))
-        self.btn_annuler = ttk.Button(outils, text="↶ Annuler", command=self.annuler, state="disabled")
+        self.btn_annuler = ttk.Button(outils, style="Petit.TButton", text="↶ Annuler", command=self.annuler, state="disabled")
         self.btn_annuler.pack(side="left", padx=2)
-        self.btn_retablir = ttk.Button(outils, text="↷ Rétablir", command=self.retablir, state="disabled")
+        self.btn_retablir = ttk.Button(outils, style="Petit.TButton", text="↷ Rétablir", command=self.retablir, state="disabled")
         self.btn_retablir.pack(side="left", padx=2)
         ttk.Separator(outils, orient="vertical").pack(side="left", fill="y", padx=5)
-        ttk.Button(outils, text="Ouvrir…", command=self.ouvrir_arbre).pack(side="left", padx=2)
-        ttk.Button(outils, text="Enregistrer…", command=self.sauvegarder_arbre).pack(side="left", padx=2)
+        ttk.Button(outils, style="Petit.TButton", text="Ouvrir…", command=self.ouvrir_arbre).pack(side="left", padx=2)
+        ttk.Button(outils, style="Petit.TButton", text="Enregistrer…", command=self.sauvegarder_arbre).pack(side="left", padx=2)
         ttk.Separator(outils, orient="vertical").pack(side="left", fill="y", padx=5)
-        ttk.Button(outils, text="−", width=3, command=lambda: self.modifier_zoom(1 / 1.15)).pack(side="left", padx=1)
-        ttk.Button(outils, text="100%", command=self.zoom_initial).pack(side="left", padx=1)
-        ttk.Button(outils, text="⛶ Plein écran", command=self.ouvrir_plein_ecran).pack(side="left", padx=3)
-        ttk.Button(outils, text="+", width=3, command=lambda: self.modifier_zoom(1.15)).pack(side="left", padx=1)
+        ttk.Button(outils, style="Petit.TButton", text="−", width=3, command=lambda: self.modifier_zoom(1 / 1.15)).pack(side="left", padx=1)
+        ttk.Button(outils, style="Petit.TButton", text="100%", command=self.zoom_initial).pack(side="left", padx=1)
+        ttk.Button(outils, style="Petit.TButton", text="⛶ Plein écran", command=self.ouvrir_plein_ecran).pack(side="left", padx=3)
+        ttk.Button(outils, style="Petit.TButton", text="+", width=3, command=lambda: self.modifier_zoom(1.15)).pack(side="left", padx=1)
         ligne = ttk.Frame(barre)
         ligne.pack(fill="x", pady=(2, 0))
         self.lbl_sel = ttk.Label(ligne, text="Aucun nœud sélectionné (cliquez sur un nœud)")
         self.lbl_sel.pack(side="left")
         ttk.Checkbutton(ligne, text="Vue valeur / pointeurs", variable=self.vue_pointeurs,
                         command=self.dessiner).pack(side="left", padx=8)
-        leg = ttk.Frame(ligne)
-        leg.pack(side="right")
+        leg = ttk.Frame(barre)          # légende sur sa propre ligne : jamais coupée
+        leg.pack(anchor="w", pady=(3, 0))
         for txt, col in (("en cours", C_COURANT), ("parcouru", COULEURS["enter"]),
                          ("traité", COULEURS["visit"]), ("ignoré", COULEURS["skip"]),
                          ("trouvé", COULEURS["found"]), ("erreur", COULEURS["bad"]),
@@ -2166,9 +2669,9 @@ class Application(tk.Tk):
                         variable=self.mode_code, command=self.afficher_algo).pack(side="left", padx=4)
         self.txt_algo = self.creer_texte(cadre_algo)
         self.txt_algo.configure(bg="black", fg="#E8E8E8", insertbackground="white",
-                                font=("Courier New", 11))
-        self.txt_algo.tag_configure("titre", font=("Arial", 11, "bold"), foreground="#6CB6FF")
-        self.txt_algo.tag_configure("kw", foreground="#C792EA", font=("Courier New", 11, "bold"))
+                                font=("Courier New", 10))
+        self.txt_algo.tag_configure("titre", font=("Arial", 10, "bold"), foreground="#6CB6FF")
+        self.txt_algo.tag_configure("kw", foreground="#C792EA", font=("Courier New", 10, "bold"))
         self.txt_algo.tag_configure("num", foreground="#F2B880")
         self.txt_algo.tag_configure("com", foreground="#7EC27E")
 
@@ -2183,7 +2686,7 @@ class Application(tk.Tk):
         self.res_notebook.add(f_notations, text="Notations de l'arbre")
         self.res_notebook.add(f_cours, text="Cours")
         self.txt_notations_arbre = self.creer_texte(f_notations)
-        self.txt_notations_arbre.configure(wrap="none", font=("Consolas", 10))
+        self.txt_notations_arbre.configure(wrap="none", font=("Consolas", 9))
         sbh = ttk.Scrollbar(f_notations, orient="horizontal", command=self.txt_notations_arbre.xview)
         self.txt_notations_arbre.configure(xscrollcommand=sbh.set)
         sbh.pack(side="bottom", fill="x", before=self.txt_notations_arbre.master)
@@ -2191,34 +2694,41 @@ class Application(tk.Tk):
         f_code = ttk.Frame(self.res_notebook)
         self.res_notebook.add(f_code, text="Code de l'arbre")
         self.tab_code = f_code
-        code_pane = ttk.PanedWindow(f_code, orient="horizontal")
-        code_pane.pack(fill="both", expand=True)
-        left, right, java = (ttk.LabelFrame(code_pane, text="Python — déclaration et construction"),
-                             ttk.LabelFrame(code_pane, text="C — structure et déclaration"),
-                             ttk.LabelFrame(code_pane, text="Java — déclaration et construction"))
-        code_pane.add(left, weight=1); code_pane.add(right, weight=1); code_pane.add(java, weight=1)
-        bar_py, bar_c, bar_java = ttk.Frame(left), ttk.Frame(right), ttk.Frame(java)
-        bar_py.pack(fill="x", padx=4, pady=3); bar_c.pack(fill="x", padx=4, pady=3)
-        bar_java.pack(fill="x", padx=4, pady=3)
-        ttk.Label(bar_py, text="Code Python").pack(side="left")
-        ttk.Button(bar_py, text="COPIER", width=9,
-                   command=lambda: self.copier_code(self.txt_tree_py, "Python")).pack(side="right")
-        ttk.Label(bar_c, text="Code C").pack(side="left")
-        ttk.Button(bar_c, text="COPIER", width=9,
-                   command=lambda: self.copier_code(self.txt_tree_c, "C")).pack(side="right")
-        ttk.Label(bar_java, text="Code Java").pack(side="left")
-        ttk.Button(bar_java, text="COPIER", width=9,
-                   command=lambda: self.copier_code(self.txt_tree_java, "Java")).pack(side="right")
-        self.txt_tree_py, self.txt_tree_c = self.creer_texte(left), self.creer_texte(right)
-        self.txt_tree_java = self.creer_texte(java)
-        for widget in (self.txt_tree_py, self.txt_tree_c, self.txt_tree_java):
-            widget.configure(font=("Consolas", 10), bg="#15171C", fg="#E6EDF3", insertbackground="white")
+        # Une seule zone de code affichée à la fois, choisie dans une liste déroulante.
+        self.code_langages = ["Python", "C", "Java", "Pascal", "JSON"]
+        self.code_langage_var = tk.StringVar(value="Python")
+        barre_code_arbre = ttk.Frame(f_code)
+        barre_code_arbre.pack(fill="x", padx=4, pady=3)
+        ttk.Label(barre_code_arbre, text="Langage :").pack(side="left")
+        combo_code = ttk.Combobox(barre_code_arbre, textvariable=self.code_langage_var,
+                                  values=self.code_langages, state="readonly", width=10)
+        combo_code.pack(side="left", padx=6)
+        combo_code.bind("<<ComboboxSelected>>", lambda _e: self.choisir_langage_code())
+        ttk.Button(barre_code_arbre, text="COPIER", width=9,
+                   command=self.copier_code_courant).pack(side="right")
+        zone_code = ttk.Frame(f_code)
+        zone_code.pack(fill="both", expand=True)
+        self.cadres_code = {}
+        for nom in self.code_langages:
+            cadre_l = ttk.Frame(zone_code)
+            self.cadres_code[nom] = cadre_l
+        self.txt_tree_py = self.creer_texte(self.cadres_code["Python"])
+        self.txt_tree_c = self.creer_texte(self.cadres_code["C"])
+        self.txt_tree_java = self.creer_texte(self.cadres_code["Java"])
+        self.txt_tree_pascal = self.creer_texte(self.cadres_code["Pascal"])
+        self.txt_tree_json = self.creer_texte(self.cadres_code["JSON"])
+        self.txt_code_par_langage = {"Python": self.txt_tree_py, "C": self.txt_tree_c,
+                                     "Java": self.txt_tree_java, "Pascal": self.txt_tree_pascal,
+                                     "JSON": self.txt_tree_json}
+        for widget in self.txt_code_par_langage.values():
+            widget.configure(font=("Consolas", 9), bg="#15171C", fg="#E6EDF3", insertbackground="white")
+        self.cadres_code["Python"].pack(fill="both", expand=True)
         self.tab_res, self.tab_trace = f_res, f_trace
         self.txt_res = self.creer_texte(f_res)
-        self.txt_res.tag_configure("titre", font=("Arial", 11, "bold"), foreground="#0B5394")
-        self.txt_res.tag_configure("res", font=("Arial", 15, "bold"), foreground="#B45F06")
-        self.txt_res.tag_configure("ok", foreground="#1E8E3E", font=("Courier New", 10, "bold"))
-        self.txt_res.tag_configure("ko", foreground="#C5221F", font=("Courier New", 10, "bold"))
+        self.txt_res.tag_configure("titre", font=("Arial", 10, "bold"), foreground="#0B5394")
+        self.txt_res.tag_configure("res", font=("Arial", 13, "bold"), foreground="#B45F06")
+        self.txt_res.tag_configure("ok", foreground="#1E8E3E", font=("Courier New", 9, "bold"))
+        self.txt_res.tag_configure("ko", foreground="#C5221F", font=("Courier New", 9, "bold"))
         self.txt_trace = self.creer_texte(f_trace)
         txt_cours = self.creer_texte(f_cours)
         txt_cours.config(state="normal")
@@ -2242,7 +2752,7 @@ class Application(tk.Tk):
         """Crée un champ texte défilant pour les cours, résultats, traces ou codes."""
         cadre = ttk.Frame(parent)
         cadre.pack(fill="both", expand=True)
-        t = tk.Text(cadre, wrap="word", font=("Courier New", 10), height=8, width=40,
+        t = tk.Text(cadre, wrap="word", font=("Courier New", 9), height=8, width=40,
                     state="disabled", bg="#FFFEFA", fg=C_ENCRE,
                     highlightthickness=1, highlightbackground="#E5D8B8")
         sb = ttk.Scrollbar(cadre, command=t.yview)
@@ -2260,13 +2770,64 @@ class Application(tk.Tk):
             parent.columnconfigure(c, weight=1)
 
     def nouvel_onglet(self, titre):
-        """Crée une page de commandes (affichée par la barre latérale) à colonne extensible."""
-        f = ttk.Frame(self.zone_pages, padding=6)
-        f.grid(row=0, column=0, sticky="nsew")
-        f.grid_remove()
+        """Crée une page de commandes défilante (affichée par la barre latérale).
+
+        La page est posée dans un canevas : si ses commandes dépassent la hauteur
+        disponible, une barre de défilement apparaît (molette de la souris incluse)
+        au lieu de couper le bas de la page.  La méthode renvoie le cadre interne.
+        """
+        cadre = ttk.Frame(self.zone_pages)
+        cadre.grid(row=0, column=0, sticky="nsew")
+        cadre.grid_remove()
+        cadre.rowconfigure(0, weight=1)
+        cadre.columnconfigure(0, weight=1)
+        canevas = tk.Canvas(cadre, bg="#F7F2E7", highlightthickness=0, borderwidth=0)
+        barre = ttk.Scrollbar(cadre, orient="vertical", command=canevas.yview)
+        canevas.configure(yscrollcommand=barre.set)
+        canevas.grid(row=0, column=0, sticky="nsew")
+        f = ttk.Frame(canevas, padding=6)
         f.columnconfigure(0, weight=1)
-        self.pages[titre] = f
+        fenetre = canevas.create_window(0, 0, window=f, anchor="nw")
+        etat = {"barre": False}
+
+        def ajuster(_ev=None):
+            h, req = canevas.winfo_height(), f.winfo_reqheight()
+            haut_page = max(h, req)
+            canevas.itemconfigure(fenetre, width=max(canevas.winfo_width(), 1), height=haut_page)
+            canevas.configure(scrollregion=(0, 0, canevas.winfo_width(), haut_page))
+            besoin = req > h + 1
+            if besoin != etat["barre"]:
+                etat["barre"] = besoin
+                if besoin:
+                    barre.grid(row=0, column=1, sticky="ns")
+                else:
+                    barre.grid_remove()
+                    canevas.yview_moveto(0)
+        canevas.bind("<Configure>", ajuster)
+        f.bind("<Configure>", ajuster)
+        self.pages[titre] = cadre
+        self.pages_canvas[titre] = (canevas, etat)
+        if not getattr(self, "_roulette_pages_liee", False):
+            self._roulette_pages_liee = True
+            self.bind_all("<MouseWheel>", self._roulette_pages, add="+")
+            self.bind_all("<Button-4>", self._roulette_pages, add="+")
+            self.bind_all("<Button-5>", self._roulette_pages, add="+")
         return f
+
+    def _roulette_pages(self, ev):
+        """Fait défiler la page de commandes affichée quand la souris est au-dessus."""
+        if self.page_active not in self.pages_canvas or isinstance(ev.widget, tk.Text):
+            return
+        canevas, etat = self.pages_canvas[self.page_active]
+        if not etat["barre"]:
+            return
+        w = ev.widget
+        while isinstance(w, tk.Misc) and w is not self:
+            if w is self.pages[self.page_active]:
+                haut = ev.num == 4 or getattr(ev, "delta", 0) > 0
+                canevas.yview_scroll(-3 if haut else 3, "units")
+                return
+            w = w.master
 
     def construire_navigation(self, nav):
         """Barre latérale : pages regroupées par section, icône + libellé, repliable."""
@@ -2275,7 +2836,7 @@ class Application(tk.Tk):
         self.nav_lignes = {}      # titre -> (ligne, barre, libellé, icône, texte court)
         self.nav_entetes = []     # (étiquette, texte de la section)
         self.nav_infobulle = None
-        bascule = tk.Label(nav, text="☰  Menu", font=(self.police, 11, "bold"), bg=NAV_FOND,
+        bascule = tk.Label(nav, text="☰  Menu", font=(self.police, 10, "bold"), bg=NAV_FOND,
                            fg="#E8D39A", anchor="w", padx=14, pady=10, cursor="hand2")
         bascule.pack(fill="x")
         bascule.bind("<Button-1>", lambda _e: self.basculer_navigation())
@@ -2302,7 +2863,7 @@ class Application(tk.Tk):
         ligne.pack(fill="x")
         barre = tk.Frame(ligne, width=4, bg=NAV_FOND)
         barre.pack(side="left", fill="y")
-        lbl = tk.Label(ligne, text=f"{icone}  {court}", font=(self.police, 10), bg=NAV_FOND,
+        lbl = tk.Label(ligne, text=f"{icone}  {court}", font=(self.police, 9), bg=NAV_FOND,
                        fg=NAV_TEXTE, anchor="w", padx=10, pady=7)
         lbl.pack(side="left", fill="x", expand=True)
         for w in (ligne, barre, lbl):
@@ -2419,16 +2980,16 @@ class Application(tk.Tk):
         ttk.Label(f, text=("Saisis jusqu’à 31 valeurs séparées par des virgules. "
                            "Elles seront placées niveau par niveau : la première est la racine, "
                            "puis les fils gauche et droit, de gauche à droite."),
-                  wraplength=350, justify="left").grid(row=1, column=0, sticky="ew")
+                  wraplength=335, justify="left").grid(row=1, column=0, sticky="ew")
         self.construction_var = tk.StringVar(value="8, 3, 10, 1, 6, 9, 14")
         ttk.Entry(f, textvariable=self.construction_var).grid(row=2, column=0, sticky="ew", pady=5)
         self.grille_boutons(f, [("🌱 Démarrer", self.demarrer_construction)], row0=3)
         self.grille_boutons(f, [("⏭ Étape suivante", self.etape_construction)], row0=4)
         self.lbl_construction = ttk.Label(f, text="Prêt ? Démarre pour réserver le premier nœud.",
-                                         wraplength=350, justify="left")
+                                         wraplength=335, justify="left")
         self.lbl_construction.grid(row=5, column=0, sticky="ew", pady=8)
         ttk.Label(f, text="À observer : l’adresse mémoire, puis les pointeurs gauche et droit.",
-                  wraplength=350).grid(row=6, column=0, sticky="ew")
+                  wraplength=335).grid(row=6, column=0, sticky="ew")
         ttk.Separator(f).grid(row=7, column=0, sticky="ew", pady=8)
         ttk.Label(f, text="✏️ Dessin manuel", style="Titre.TLabel").grid(row=8, column=0, sticky="w")
         ttk.Checkbutton(f, text="Activer le dessin sur le canevas", variable=self.dessin_manuel,
@@ -2443,7 +3004,7 @@ class Application(tk.Tk):
                      state="readonly", width=8).pack(side="left")
         ttk.Label(f, text="Clique sur le canevas pour poser la racine. Ensuite, sélectionne un parent, "
                      "choisis le côté et clique à l’emplacement du nouveau fils.",
-                  wraplength=350, justify="left").grid(row=11, column=0, sticky="ew")
+                  wraplength=335, justify="left").grid(row=11, column=0, sticky="ew")
         f.columnconfigure(0, weight=1)
 
     def demarrer_construction(self):
@@ -2509,7 +3070,7 @@ class Application(tk.Tk):
 
     def _surligner_construction(self, index, racine=False):
         """Surligne les lignes d'allocation Python, C et Java correspondant au pas."""
-        for widget in (self.txt_tree_py, self.txt_tree_c, self.txt_tree_java):
+        for widget in (self.txt_tree_py, self.txt_tree_c, self.txt_tree_java, self.txt_tree_pascal):
             widget.tag_configure("etape_active", background="#665B22", foreground="#FFF3B0")
             widget.tag_remove("etape_active", "1.0", "end")
         lignes_py = self.txt_tree_py.get("1.0", "end-1c").splitlines()
@@ -2535,12 +3096,18 @@ class Application(tk.Tk):
         if java_line:
             self.txt_tree_java.tag_add("etape_active", f"{java_line}.0", f"{java_line}.end")
             self.txt_tree_java.see(f"{java_line}.0")
+        pascal_lines = self.txt_tree_pascal.get("1.0", "end-1c").splitlines()
+        pascal_motif = f"n{cid if not racine else 0} := Creer("
+        pascal_line = next((j for j, line in enumerate(pascal_lines, 1) if pascal_motif in line), None)
+        if pascal_line:
+            self.txt_tree_pascal.tag_add("etape_active", f"{pascal_line}.0", f"{pascal_line}.end")
+            self.txt_tree_pascal.see(f"{pascal_line}.0")
 
     def onglet_avance(self):
         """Crée l'accès aux ateliers rouge-noir et arbre d'expression."""
         f = self.nouvel_onglet("Ateliers")
         ttk.Label(f, text="Arbres rouge-noir", style="Titre.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(f, text="Un arbre rouge-noir est un ABR équilibré. La génération applique les rotations et recolorations standard.", wraplength=350).grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Label(f, text="Un arbre rouge-noir est un ABR équilibré. La génération applique les rotations et recolorations standard.", wraplength=335).grid(row=1, column=0, sticky="w", pady=3)
         self.grille_boutons(f, [("Générer un rouge-noir", self.generer_rouge_noir)], row0=2)
         ttk.Separator(f).grid(row=3, column=0, sticky="ew", pady=8)
         ttk.Label(f, text="Expression → arbre", style="Titre.TLabel").grid(row=4, column=0, sticky="w")
@@ -2556,11 +3123,11 @@ class Application(tk.Tk):
             row=0, column=0, sticky="w", pady=(0, 5))
         ttk.Label(f, text=("Décris chaque nœud puis ses enfants entre parenthèses. "
                            "Sépare les définitions par des points-virgules."),
-                  wraplength=350, justify="left").grid(row=1, column=0, sticky="ew")
+                  wraplength=335, justify="left").grid(row=1, column=0, sticky="ew")
         ttk.Label(f, text="Exemple : A(B,C,D); B(E,F); C(G)",
                   font=("Consolas", 9, "bold")).grid(row=2, column=0, sticky="w", pady=5)
         ttk.Label(f, text="A est la racine ; B, C et D sont ses enfants. B a les enfants E et F.",
-                  wraplength=350, justify="left").grid(row=3, column=0, sticky="ew")
+                  wraplength=335, justify="left").grid(row=3, column=0, sticky="ew")
         ttk.Entry(f, textvariable=self.na_var).grid(row=4, column=0, sticky="ew", pady=5)
         self.grille_boutons(f, [("🌿 Convertir immédiatement", self.convertir_na),
                                 ("▶ Démarrer la simulation", self.demarrer_simulation_na)],
@@ -2577,33 +3144,159 @@ class Application(tk.Tk):
                                               command=self.simulation_na_terminer, state="disabled")
         self.btn_sim_na_terminer.pack(side="left", expand=True, fill="x", padx=1)
         self.lbl_sim_na = ttk.Label(f, text="Démarre la simulation pour suivre chaque lien.",
-                                    wraplength=350, justify="left", font=("Arial", 9, "bold"))
+                                    wraplength=335, justify="left", font=("Arial", 9, "bold"))
         self.lbl_sim_na.grid(row=7, column=0, sticky="ew", pady=3)
         ttk.Label(f, text=("Règle : le premier enfant devient le fils gauche. "
                            "Chaque frère suivant devient le fils droit du frère précédent."),
-                  wraplength=350, justify="left").grid(row=8, column=0, sticky="ew", pady=5)
+                  wraplength=335, justify="left").grid(row=8, column=0, sticky="ew", pady=5)
         ttk.Label(f, text="Le résultat se dessine sur le canevas et les correspondances apparaissent dans Résultat.",
-                  wraplength=350, justify="left").grid(row=9, column=0, sticky="ew")
+                  wraplength=335, justify="left").grid(row=9, column=0, sticky="ew")
         f.columnconfigure(0, weight=1)
 
     def onglet_notations(self):
-        """Crée l'explorateur des représentations textuelles et graphiques d'arbres."""
+        """Crée la page Notations : explorateur et convertisseur de notations."""
         f = self.nouvel_onglet("Notations")
-        ttk.Label(f, text="Explorer les notations d’arbres", style="Titre.TLabel").grid(
+        f.rowconfigure(0, weight=1)
+        sous = ttk.Notebook(f)
+        sous.grid(row=0, column=0, sticky="nsew")
+        f_expl = ttk.Frame(sous, padding=4)
+        f_conv = ttk.Frame(sous, padding=4)
+        sous.add(f_expl, text="Explorer")
+        sous.add(f_conv, text="⇄ Convertisseur")
+        f_expl.columnconfigure(0, weight=1)
+        ttk.Label(f_expl, text="Explorer les notations d’arbres", style="Titre.TLabel").grid(
             row=0, column=0, sticky="w", pady=(0, 5))
-        ttk.Label(f, text="Notation parent-enfants : A(B,C); B(E,T). "
-                     "Le premier nœud défini est la racine.",
-                  wraplength=350, justify="left").grid(row=1, column=0, sticky="ew")
-        ttk.Entry(f, textvariable=self.notation_var).grid(row=2, column=0, sticky="ew", pady=5)
-        ttk.Button(f, text="🔄 Afficher les notations équivalentes",
+        ttk.Label(f_expl, text="Notation parent-enfants : A(B,C); B(E,T). "
+                               "Le premier nœud défini est la racine.",
+                  wraplength=335, justify="left").grid(row=1, column=0, sticky="ew")
+        ttk.Entry(f_expl, textvariable=self.notation_var).grid(row=2, column=0, sticky="ew", pady=5)
+        ttk.Button(f_expl, text="🔄 Afficher les notations équivalentes",
                    command=self.afficher_notations).grid(row=3, column=0, sticky="ew")
-        cadre_notations = ttk.Frame(f)
+        cadre_notations = ttk.Frame(f_expl)
         cadre_notations.grid(row=4, column=0, sticky="nsew", pady=(5, 0))
         self.txt_notations = self.creer_texte(cadre_notations)
-        self.txt_notations.configure(wrap="none", font=("Consolas", 10))
-        f.rowconfigure(4, weight=1)
-        f.columnconfigure(0, weight=1)
+        self.txt_notations.configure(wrap="none", font=("Consolas", 9))
+        f_expl.rowconfigure(4, weight=1)
         self.afficher_notations()
+        self.construire_convertisseur(f_conv)
+
+    # ----- convertisseur de notations
+    def construire_convertisseur(self, f):
+        """Construit l'interface du convertisseur d'une notation d'arbre à une autre."""
+        f.columnconfigure(0, weight=1)
+        self.conv_cle_de = {lib: cle for cle, lib in FORMATS_NOTATION}
+        self.conv_cle_de[LIBELLE_AUTO] = "auto"
+        self.conv_cle_de[LIBELLE_TOUTES] = "toutes"
+        self.conv_lib_de = {cle: lib for cle, lib in FORMATS_NOTATION}
+        self.conv_binaire = tk.BooleanVar(value=False)
+        self.conv_source = tk.StringVar(value=LIBELLE_AUTO)
+        self.conv_cible = tk.StringVar(value=FORMATS_NOTATION[1][1])
+        self.conv_dernier = ""
+        ttk.Label(f, text="Convertir une notation d’arbre", style="Titre.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 3))
+        ttk.Checkbutton(f, text="Arbre binaire (fils gauche et droit distincts)",
+                        variable=self.conv_binaire).grid(row=1, column=0, sticky="w")
+        sel = ttk.Frame(f)
+        sel.grid(row=2, column=0, sticky="ew", pady=3)
+        sel.columnconfigure(1, weight=1)
+        ttk.Label(sel, text="De :").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(sel, textvariable=self.conv_source, state="readonly",
+                     values=[LIBELLE_AUTO] + [lib for _, lib in FORMATS_NOTATION]).grid(
+            row=0, column=1, sticky="ew", padx=4, pady=1)
+        ttk.Label(sel, text="Vers :").grid(row=1, column=0, sticky="w")
+        ttk.Combobox(sel, textvariable=self.conv_cible, state="readonly",
+                     values=[lib for _, lib in FORMATS_NOTATION] + [LIBELLE_TOUTES]).grid(
+            row=1, column=1, sticky="ew", padx=4, pady=1)
+        cadre = ttk.Frame(f)
+        cadre.grid(row=3, column=0, sticky="ew")
+        self.conv_entree = tk.Text(cadre, height=7, width=40, wrap="none", undo=True,
+                                   font=("Consolas", 9), bg="#FFFEFA", fg=C_ENCRE,
+                                   highlightthickness=1, highlightbackground="#E5D8B8")
+        sb = ttk.Scrollbar(cadre, command=self.conv_entree.yview)
+        self.conv_entree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self.conv_entree.pack(side="left", fill="both", expand=True)
+        self.conv_entree.insert("1.0", self.notation_var.get())
+        boutons = ttk.Frame(f)
+        boutons.grid(row=4, column=0, sticky="ew", pady=3)
+        self.grille_boutons(boutons, [
+            ("⇄ Convertir", self.convertir_notations),
+            ("↕ Échanger", self.echanger_notations),
+            ("🌳 Arbre dessiné", self.importer_arbre_notations),
+            ("📋 Copier le résultat", self.copier_notation)], colonnes=2)
+        self.conv_statut = ttk.Label(f, text="", wraplength=335, justify="left")
+        self.conv_statut.grid(row=5, column=0, sticky="w")
+        cadre_res = ttk.Frame(f)
+        cadre_res.grid(row=6, column=0, sticky="nsew", pady=(3, 0))
+        self.conv_sortie = self.creer_texte(cadre_res)
+        self.conv_sortie.configure(wrap="none", font=("Consolas", 9))
+        f.rowconfigure(6, weight=1)
+        ttk.Label(f, justify="left", foreground="#555", wraplength=335, text=(
+            "Fils absent (arbre binaire) : ∅, NULL, _ ou -.  Sans la case « binaire », "
+            "le codage gauche / droite se lit « fils gauche – frère droit ».")
+        ).grid(row=7, column=0, sticky="w", pady=(3, 0))
+
+    def _statut_conversion(self, texte, ok=True):
+        self.conv_statut.config(text=texte, foreground="#067647" if ok else "#B42318")
+
+    def convertir_notations(self):
+        """Convertit le texte saisi vers la notation cible choisie."""
+        cible = self.conv_cle_de[self.conv_cible.get()]
+        source = self.conv_cle_de[self.conv_source.get()]
+        try:
+            res, utilisee = convertir_notation(self.conv_entree.get("1.0", "end"),
+                                               source, cible, self.conv_binaire.get())
+        except ValueError as e:
+            self.vider_texte(self.conv_sortie)
+            self.ecrire(self.conv_sortie, f"Conversion impossible\n\n{e}")
+            self.conv_dernier = ""
+            self._statut_conversion(f"✖ {e}", ok=False)
+            return False
+        self.conv_dernier = res
+        self.conv_derniere_source = utilisee
+        self.vider_texte(self.conv_sortie)
+        self.ecrire(self.conv_sortie, res)
+        self.conv_sortie.see("1.0")
+        self._statut_conversion(f"✔ Notation lue : {self.conv_lib_de[utilisee].split('   ')[0]}")
+        return True
+
+    def echanger_notations(self):
+        """Remplace la saisie par le résultat et inverse les deux notations."""
+        if not self.convertir_notations():
+            return
+        cible = self.conv_cle_de[self.conv_cible.get()]
+        if cible == "toutes":
+            self._statut_conversion("Choisissez une notation précise pour échanger.", ok=False)
+            return
+        ancienne = self.conv_derniere_source
+        self.conv_entree.delete("1.0", "end")
+        self.conv_entree.insert("1.0", self.conv_dernier)
+        self.conv_source.set(self.conv_lib_de[cible])
+        self.conv_cible.set(self.conv_lib_de[ancienne])
+        self.convertir_notations()
+
+    def importer_arbre_notations(self):
+        """Écrit l'arbre dessiné dans la notation « De » (parent-enfants si automatique)."""
+        if not self.exiger_arbre():
+            return
+        racine, enfants = arbre_binaire_vers_table(self.racine)
+        cle = self.conv_cle_de[self.conv_source.get()]
+        if cle == "auto":
+            cle = "pe"
+            self.conv_source.set(self.conv_lib_de["pe"])
+        self.conv_binaire.set(True)
+        self.conv_entree.delete("1.0", "end")
+        self.conv_entree.insert("1.0", ecrire_notation(racine, enfants, True, cle))
+        self.convertir_notations()
+
+    def copier_notation(self):
+        """Copie le résultat de la conversion dans le presse-papiers."""
+        if not self.conv_dernier:
+            self.convertir_notations()
+        if self.conv_dernier:
+            self.clipboard_clear()
+            self.clipboard_append(self.conv_dernier)
+            self._statut_conversion("✔ Résultat copié dans le presse-papiers.")
 
     def afficher_notations(self):
         """Affiche les notations parent-enfants, imbriquée, indentée et binaire."""
@@ -2632,12 +3325,12 @@ class Application(tk.Tk):
         fen.configure(bg="#F7F2E7")
         fen.resizable(False, False)
         fen.transient(self)
-        tk.Label(fen, text="TreeLab", font=("Arial", 22, "bold"), bg="#F7F2E7",
+        tk.Label(fen, text="TreeLab", font=("Arial", 20, "bold"), bg="#F7F2E7",
                  fg="#805B12").pack(padx=24, pady=(18, 0))
-        tk.Label(fen, text="TreeLab by Nadir BOUCHAMA", font=("Arial", 11, "italic"),
+        tk.Label(fen, text="TreeLab by Nadir BOUCHAMA", font=("Arial", 10, "italic"),
                  bg="#F7F2E7", fg=C_ENCRE).pack(pady=(0, 10))
         tk.Label(fen, justify="left", wraplength=480, bg="#F7F2E7", fg=C_ENCRE,
-                 font=("Arial", 10), text=(
+                 font=("Arial", 9), text=(
             "TreeLab est une application de bureau pédagogique dédiée à l’apprentissage "
             "des arbres binaires et des arbres binaires de recherche. Elle associe une "
             "représentation graphique interactive à des animations pas à pas pour rendre "
@@ -2648,9 +3341,9 @@ class Application(tk.Tk):
             "opération et d’observer son effet sur les nœuds, les liens et les résultats "
             "affichés.")).pack(padx=24)
         tk.Label(fen, text="Novembre 2026", bg="#F7F2E7", fg="#5C5140",
-                 font=("Arial", 10)).pack(pady=(10, 0))
+                 font=("Arial", 9)).pack(pady=(10, 0))
         mail = tk.Label(fen, text="nadir.bouchama@gmail.com", bg="#F7F2E7", fg="#175CD3",
-                        font=("Arial", 10, "underline"), cursor="hand2")
+                        font=("Arial", 9, "underline"), cursor="hand2")
         mail.pack()
         mail.bind("<Button-1>", lambda _e: webbrowser.open("mailto:nadir.bouchama@gmail.com"))
         ttk.Button(fen, text="Fermer", command=fen.destroy).pack(pady=14)
@@ -2666,7 +3359,7 @@ class Application(tk.Tk):
         ttk.Label(f, text="Calculer une expression", style="Titre.TLabel").grid(
             row=0, column=0, sticky="w", pady=(0, 5))
         ttk.Label(f, text="Saisis une formule numérique. Pour une notation polonaise, sépare chaque nombre et opérateur par un espace.",
-                  wraplength=350, justify="left").grid(row=1, column=0, sticky="ew")
+                  wraplength=335, justify="left").grid(row=1, column=0, sticky="ew")
         ttk.Entry(f, textvariable=self.calcul_expression).grid(row=2, column=0, sticky="ew", pady=5)
         ttk.Label(f, text="Format de la formule saisie :").grid(row=3, column=0, sticky="w")
         ttk.Combobox(f, textvariable=self.calcul_format,
@@ -2679,16 +3372,16 @@ class Application(tk.Tk):
         ttk.Button(f, text="▶ Calculer et simuler", command=self.calculer_notation).grid(
             row=7, column=0, sticky="ew", pady=4)
         self.lbl_calcul_notations = ttk.Label(f, text="Préfixe : —\nPostfixe : —",
-                                              wraplength=350, justify="left")
+                                              wraplength=335, justify="left")
         self.lbl_calcul_notations.grid(row=8, column=0, sticky="ew", pady=5)
         ttk.Label(f, text="Pile de calcul · bas → sommet", style="Titre.TLabel").grid(
             row=9, column=0, sticky="w", pady=(8, 2))
-        ttk.Label(f, textvariable=self.calcul_pile, wraplength=350, justify="left",
-                  font=("Consolas", 10, "bold"), padding=7,
+        ttk.Label(f, textvariable=self.calcul_pile, wraplength=335, justify="left",
+                  font=("Consolas", 9, "bold"), padding=7,
                   relief="groove").grid(row=10, column=0, sticky="ew")
         ttk.Label(f, text=("Préfixe : l’opérateur précède ses nombres et la pile se lit de droite à gauche. "
                            "Postfixe : l’opérateur suit ses nombres et la pile se lit de gauche à droite."),
-                  wraplength=350, justify="left").grid(row=11, column=0, sticky="ew", pady=7)
+                  wraplength=335, justify="left").grid(row=11, column=0, sticky="ew", pady=7)
         f.columnconfigure(0, weight=1)
 
     def calculer_notation(self):
@@ -2807,12 +3500,27 @@ class Application(tk.Tk):
 
     def _montrer_code_arbre(self):
         if not hasattr(self, "txt_tree_py"): return
-        self.vider_texte(self.txt_tree_py); self.vider_texte(self.txt_tree_c)
-        self.vider_texte(self.txt_tree_java)
-        self.ecrire(self.txt_tree_py, code_structure_python(self.racine))
-        self.ecrire(self.txt_tree_c, code_structure_c(self.racine))
-        self.ecrire(self.txt_tree_java, code_structure_java(self.racine))
+        generateurs = {"Python": code_structure_python, "C": code_structure_c,
+                       "Java": code_structure_java, "Pascal": code_structure_pascal,
+                       "JSON": code_structure_json}
+        for nom, widget in self.txt_code_par_langage.items():
+            self.vider_texte(widget)
+            self.ecrire(widget, generateurs[nom](self.racine))
+            widget.see("1.0")
         self.res_notebook.select(self.tab_code)
+
+    def choisir_langage_code(self):
+        """Affiche uniquement la zone de code du langage choisi."""
+        choix = self.code_langage_var.get()
+        for nom, cadre in self.cadres_code.items():
+            if nom == choix:
+                cadre.pack(fill="both", expand=True)
+            else:
+                cadre.pack_forget()
+
+    def copier_code_courant(self):
+        langage = self.code_langage_var.get()
+        self.copier_code(self.txt_code_par_langage[langage], langage)
 
     def copier_code(self, widget, langage):
         code = widget.get("1.0", "end-1c")
@@ -3060,11 +3768,23 @@ class Application(tk.Tk):
         lf = ttk.LabelFrame(f, text="Comparer", padding=4)
         lf.grid(row=3, column=0, sticky="ew", pady=4)
         self.grille_boutons(lf, [("Afficher les 5 parcours (résumé)", self.tous_parcours)], colonnes=1)
-        ttk.Label(f, justify="left", foreground="#444", wraplength=360, text=(
+        lf = ttk.LabelFrame(f, text="Exécution pas à pas", padding=4)
+        lf.grid(row=4, column=0, sticky="ew", pady=4)
+        ttk.Checkbutton(lf, text="Pas à pas", variable=self.pas_a_pas).grid(
+            row=0, column=0, sticky="w", padx=2)
+        ttk.Checkbutton(lf, text="Détailler sous-arbres vides", variable=self.details).grid(
+            row=0, column=1, sticky="w", padx=2)
+        self.grille_boutons(lf, [("⏭ Suivant  (F8)", self.bouton_suivant),
+                                 ("⏩ Terminer", self.bouton_terminer)], colonnes=2, row0=1)
+        lbl = ttk.Label(lf, text="Cochez « Pas à pas », lancez un parcours, puis cliquez sur Suivant.",
+                        foreground="#0B5394", wraplength=335, justify="left")
+        lbl.grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.lbls_etape.append(lbl)
+        ttk.Label(f, justify="left", foreground="#444", wraplength=335, text=(
             "Moyen mnémotechnique : la position de R dit tout.\n"
             "• R au début → PRÉfixé\n• R au milieu → INfixé\n• R à la fin → POSTfixé\n\n"
             "Cochez « Détailler sous-arbres vides » pour voir chaque appel sur NIL.")
-        ).grid(row=4, column=0, sticky="w", pady=8)
+        ).grid(row=5, column=0, sticky="w", pady=8)
 
     # ----- onglet « Mesures »
     def onglet_mesures(self):
@@ -3119,7 +3839,7 @@ class Application(tk.Tk):
             ("Équilibré (AVL)", self.test_equilibre),
             ("ABR", self.test_abr),
         ])
-        ttk.Label(f, justify="left", foreground="#444", wraplength=360, text=(
+        ttk.Label(f, justify="left", foreground="#444", wraplength=335, text=(
             "• Localement complet : chaque nœud a 0 ou 2 fils.\n"
             "• Parfait : tous les niveaux sont pleins.\n"
             "• Complet : pleins sauf le dernier, rempli à gauche.\n"
@@ -3165,7 +3885,7 @@ class Application(tk.Tk):
             ("Est-ce un ABR ?", self.test_abr),
             ("Équilibrer l'ABR", self.equilibrer),
         ])
-        ttk.Label(f, justify="left", foreground="#444", wraplength=360, text=(
+        ttk.Label(f, justify="left", foreground="#444", wraplength=335, text=(
             "Essayez : insérez 1, 2, 3, 4, 5 dans l'ordre → arbre dégénéré (hauteur 4).\n"
             "Puis « Équilibrer l'ABR » → hauteur 2.\n"
             "Comparez le nombre de comparaisons d'une recherche.")
@@ -3176,9 +3896,9 @@ class Application(tk.Tk):
         f = self.nouvel_onglet("Quiz")
         ttk.Label(f, text="Entraînez-vous !", style="Titre.TLabel").grid(row=0, column=0, sticky="w")
         self.lbl_question = ttk.Label(f, text="Cliquez sur « Nouvelle question ».",
-                                      wraplength=360, justify="left", font=("Arial", 11))
+                                      wraplength=335, justify="left", font=("Arial", 10))
         self.lbl_question.grid(row=1, column=0, sticky="w", pady=8)
-        e = ttk.Entry(f, textvariable=self.quiz_rep, font=("Arial", 12))
+        e = ttk.Entry(f, textvariable=self.quiz_rep, font=("Arial", 11))
         e.grid(row=2, column=0, sticky="ew", pady=4)
         e.bind("<Return>", lambda ev: self.quiz_verifier())
         self.grille_boutons(ttk.Frame(f), [])
@@ -3191,10 +3911,10 @@ class Application(tk.Tk):
         ], colonnes=3)
         ttk.Checkbutton(f, text="Nouvel arbre aléatoire à chaque question",
                         variable=self.quiz_nouvel_arbre).grid(row=4, column=0, sticky="w")
-        self.lbl_feedback = ttk.Label(f, text="", wraplength=360, justify="left",
-                                      font=("Arial", 11, "bold"))
+        self.lbl_feedback = ttk.Label(f, text="", wraplength=335, justify="left",
+                                      font=("Arial", 10, "bold"))
         self.lbl_feedback.grid(row=5, column=0, sticky="w", pady=8)
-        self.lbl_score = ttk.Label(f, text="Score : 0 / 0", font=("Arial", 11))
+        self.lbl_score = ttk.Label(f, text="Score : 0 / 0", font=("Arial", 10))
         self.lbl_score.grid(row=6, column=0, sticky="w")
 
     def onglet_qcm(self):
@@ -3215,31 +3935,36 @@ class Application(tk.Tk):
         ttk.Button(f, text="🌳 Générer l’arbre et les 20 questions",
                    command=self.generer_qcm).grid(row=2, column=0, sticky="ew", pady=5)
         self.lbl_qcm_progression = ttk.Label(f, text="Configure l’arbre puis démarre le QCM.",
-                                             font=("Arial", 10, "bold"))
+                                             font=("Arial", 9, "bold"))
         self.lbl_qcm_progression.grid(row=3, column=0, sticky="w", pady=(4, 2))
-        self.lbl_qcm_question = ttk.Label(f, text="", wraplength=350, justify="left",
-                                          font=("Arial", 11, "bold"))
+        self.lbl_qcm_question = ttk.Label(f, text="", wraplength=335, justify="left",
+                                          font=("Arial", 10, "bold"))
         self.lbl_qcm_question.grid(row=4, column=0, sticky="ew", pady=4)
         choix = ttk.LabelFrame(f, text="Choisis une réponse", padding=4)
         choix.grid(row=5, column=0, sticky="ew")
         self.qcm_radios = []
         for i in range(4):
             rb = tk.Radiobutton(choix, text="", variable=self.qcm_reponse_var,
-                                value="", wraplength=330, anchor="w", justify="left",
+                                value="", wraplength=300, anchor="w", justify="left",
                                 bg="#F7F2E7", fg=C_ENCRE, activebackground="#F7F2E7",
                                 selectcolor="#FFFEFA", highlightthickness=0)
             rb.grid(row=i, column=0, sticky="w", pady=1)
             self.qcm_radios.append(rb)
-        ttk.Button(f, text="Vérifier la réponse", command=self.verifier_qcm).grid(
-            row=6, column=0, sticky="ew", pady=(5, 2))
+        bv = ttk.Frame(f)
+        bv.grid(row=6, column=0, sticky="ew", pady=(5, 2))
+        ttk.Button(bv, text="Vérifier la réponse", command=self.verifier_qcm).pack(
+            side="left", expand=True, fill="x", padx=(0, 2))
+        self.btn_qcm_question_suivante = ttk.Button(bv, text="Question suivante ➜",
+                                                    command=self.qcm_suivante, state="disabled")
+        self.btn_qcm_question_suivante.pack(side="left", expand=True, fill="x", padx=(2, 0))
         nav = ttk.Frame(f)
         nav.grid(row=7, column=0, sticky="ew")
         ttk.Button(nav, text="← Précédente", command=self.qcm_precedente).pack(
             side="left", expand=True, fill="x", padx=(0, 2))
         ttk.Button(nav, text="Suivante →", command=self.qcm_suivante).pack(
             side="left", expand=True, fill="x", padx=(2, 0))
-        self.lbl_qcm_retour = ttk.Label(f, text="", wraplength=350, justify="left",
-                                        font=("Arial", 10, "bold"))
+        self.lbl_qcm_retour = ttk.Label(f, text="", wraplength=335, justify="left",
+                                        font=("Arial", 9, "bold"))
         self.lbl_qcm_retour.grid(row=8, column=0, sticky="ew", pady=5)
         self.lbl_qcm_score = ttk.Label(f, text="Score : 0 / 0")
         self.lbl_qcm_score.grid(row=9, column=0, sticky="w")
@@ -3396,6 +4121,7 @@ class Application(tk.Tk):
             self.lbl_qcm_retour.config(text=f"Score final : {self.qcm_score[0]} / 20")
             for radio in self.qcm_radios:
                 radio.config(text="", state="disabled")
+            self.btn_qcm_question_suivante.config(state="disabled")
             return
         q = self.qcm_questions[self.qcm_index]
         self.lbl_qcm_progression.config(text=f"Question {self.qcm_index + 1} / 20 · Score : {self.qcm_score[0]} / {self.qcm_score[1]}")
@@ -3408,10 +4134,15 @@ class Application(tk.Tk):
                 radio.config(text=option, value=option, state="disabled" if est_verifiee else "normal")
             else:
                 radio.config(text="", value="", state="disabled")
+        derniere = self.qcm_index == len(self.qcm_questions) - 1
+        self.btn_qcm_question_suivante.config(
+            text="Voir le score ➜" if derniere else "Question suivante ➜",
+            state="normal" if est_verifiee else "disabled")
         if est_verifiee:
             correct = self.qcm_statuts[self.qcm_index]
             self.lbl_qcm_retour.config(text=("✅ Bonne réponse !" if correct else
-                                             f"❌ Réponse attendue : {q['bonne']}"),
+                                             f"❌ Réponse attendue : {q['bonne']}")
+                                       + ("\n\nClique sur « Question suivante »." if not derniere else ""),
                                        foreground="#1E8E3E" if correct else "#B42318")
         else:
             self.lbl_qcm_retour.config(text="")
@@ -3464,15 +4195,15 @@ class Application(tk.Tk):
         ttk.Button(f, text="🎲 Nouveau défi", command=self.nouveau_defi).grid(
             row=2, column=0, sticky="ew", pady=3)
         self.lbl_defi = ttk.Label(f, text="Choisis un niveau puis lance un défi.",
-                                  wraplength=350, justify="left", font=("Arial", 11))
+                                  wraplength=335, justify="left", font=("Arial", 10))
         self.lbl_defi.grid(row=3, column=0, sticky="ew", pady=7)
         ttk.Entry(f, textvariable=self.defi_reponse).grid(row=4, column=0, sticky="ew", pady=3)
         bf = ttk.Frame(f)
         bf.grid(row=5, column=0, sticky="ew")
         ttk.Button(bf, text="Vérifier", command=self.verifier_defi).pack(side="left", expand=True, fill="x")
         ttk.Button(bf, text="Indice", command=self.indice_defi).pack(side="left", expand=True, fill="x", padx=(4, 0))
-        self.lbl_defi_retour = ttk.Label(f, text="", wraplength=350, justify="left",
-                                         font=("Arial", 10, "bold"))
+        self.lbl_defi_retour = ttk.Label(f, text="", wraplength=335, justify="left",
+                                         font=("Arial", 9, "bold"))
         self.lbl_defi_retour.grid(row=6, column=0, sticky="ew", pady=6)
         self.lbl_defi_score = ttk.Label(f, text="Score des défis : 0 / 0")
         self.lbl_defi_score.grid(row=7, column=0, sticky="w")
@@ -3483,7 +4214,7 @@ class Application(tk.Tk):
                         command=lambda: self.maj_pourquoi(self.selection)).grid(
                             row=10, column=0, sticky="w")
         self.lbl_pourquoi = ttk.Label(f, text="Active le mode puis clique sur un nœud pour comprendre ses liens.",
-                                      wraplength=350, justify="left")
+                                      wraplength=335, justify="left")
         self.lbl_pourquoi.grid(row=11, column=0, sticky="ew", pady=5)
         f.columnconfigure(0, weight=1)
 
@@ -3568,7 +4299,8 @@ class Application(tk.Tk):
     def panneau_animation(self, parent):
         """Ajoute les réglages de vitesse, pause, progression et affichage."""
         lf = ttk.LabelFrame(parent, text="Animation et affichage", padding=4)
-        lf.pack(fill="x", pady=(6, 0))
+        # side="bottom" + before : le panneau garde sa place même si la fenêtre est basse
+        lf.pack(side="bottom", fill="x", pady=(6, 0), before=self.zone_pages)
         ttk.Checkbutton(lf, text="Animer", variable=self.animer).grid(row=0, column=0, sticky="w")
         ttk.Checkbutton(lf, text="Pas à pas", variable=self.pas_a_pas).grid(row=0, column=1, sticky="w")
         ttk.Checkbutton(lf, text="Détailler sous-arbres vides",
@@ -3591,14 +4323,18 @@ class Application(tk.Tk):
             side="left", expand=True, fill="x", padx=1)
         ttk.Button(b, text="⏩ Terminer", command=self.bouton_terminer).pack(
             side="left", expand=True, fill="x", padx=1)
-        ttk.Button(b, text="Effacer couleurs", command=self.effacer_couleurs).pack(
+        b2 = ttk.Frame(lf)
+        b2.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(3, 0))
+        ttk.Button(b2, text="Effacer couleurs", command=self.effacer_couleurs).pack(
             side="left", expand=True, fill="x", padx=1)
-        ttk.Button(lf, text="↺ Réinitialiser la disposition des nœuds",
-                   command=self.reset_positions).grid(row=4, column=0, columnspan=3,
-                                                       sticky="ew", pady=(3, 0))
+        ttk.Button(b2, text="↺ Disposition des nœuds",
+                   command=self.reset_positions).pack(side="left", expand=True, fill="x", padx=1)
         ttk.Checkbutton(lf, text="Afficher les fils absents en pointillés",
                         variable=self.afficher_manquants,
                         command=self.dessiner).grid(row=5, column=0, columnspan=3, sticky="w")
+        lbl = ttk.Label(lf, text="", foreground="#0B5394", wraplength=335, justify="left")
+        lbl.grid(row=6, column=0, columnspan=3, sticky="w")
+        self.lbls_etape.append(lbl)
 
     # ==================================================================
     #  DESSIN
@@ -3660,7 +4396,7 @@ class Application(tk.Tk):
         self.positions_vides_base = {}
         if self.racine is None:
             c.configure(scrollregion=(0, 0, 10, 10))
-            c.create_text(max(c.winfo_width(), 300) // 2, 120, font=("Arial", 15),
+            c.create_text(max(c.winfo_width(), 300) // 2, 120, font=("Arial", 13),
                           fill="#888", text="Arbre vide\nCréez la racine, insérez une valeur\n"
                                             "ou chargez un exemple (onglet « Arbre »)")
             self.maj_selection()
@@ -3674,27 +4410,27 @@ class Application(tk.Tk):
             c.configure(scrollregion=(0, 0, table_w + tree_w + 40, table_h))
             x0, y0 = 24, 24
             c.create_text(x0, 0, anchor="nw", text="STRUCTURE MÉMOIRE · ADRESSES HEXADÉCIMALES",
-                          font=("Arial", 15, "bold"), fill="#101828")
+                          font=("Arial", 13, "bold"), fill="#101828")
             y0 += 34
             c.create_rectangle(x0, y0, x0 + 820, y0 + 38, fill="#EFE4C7", outline="#D3BD83")
             for px, titre in ((x0 + 12, "ADRESSE DU NŒUD"), (x0 + 190, "VALEUR"),
                               (x0 + 310, "POINTEUR GAUCHE"), (x0 + 570, "POINTEUR DROIT")):
-                c.create_text(px, y0 + 19, anchor="w", text=titre, font=("Arial", 10, "bold"), fill="#344054")
+                c.create_text(px, y0 + 19, anchor="w", text=titre, font=("Arial", 9, "bold"), fill="#344054")
             for i, n in enumerate(nodes):
                 y = y0 + 38 + i * 34
                 c.create_rectangle(x0, y, x0 + 820, y + 34,
                                    fill="#DCEBFF" if n is self.selection else ("#FFFEFA" if i % 2 == 0 else "#F6F0E2"), outline="#E9DFC8")
-                c.create_text(x0 + 12, y + 17, anchor="w", text=f"0x{id(n):016X}", font=("Consolas", 10), fill="#805B12")
-                c.create_text(x0 + 190, y + 17, anchor="w", text=str(n.valeur), font=("Consolas", 11, "bold"), fill="#101828")
-                c.create_text(x0 + 310, y + 17, anchor="w", text=(f"0x{id(n.gauche):016X}" if n.gauche else "NULL"), font=("Consolas", 10), fill="#175CD3")
-                c.create_text(x0 + 570, y + 17, anchor="w", text=(f"0x{id(n.droite):016X}" if n.droite else "NULL"), font=("Consolas", 10), fill="#175CD3")
+                c.create_text(x0 + 12, y + 17, anchor="w", text=f"0x{id(n):016X}", font=("Consolas", 9), fill="#805B12")
+                c.create_text(x0 + 190, y + 17, anchor="w", text=str(n.valeur), font=("Consolas", 10, "bold"), fill="#101828")
+                c.create_text(x0 + 310, y + 17, anchor="w", text=(f"0x{id(n.gauche):016X}" if n.gauche else "NULL"), font=("Consolas", 9), fill="#175CD3")
+                c.create_text(x0 + 570, y + 17, anchor="w", text=(f"0x{id(n.droite):016X}" if n.droite else "NULL"), font=("Consolas", 9), fill="#175CD3")
             c.create_text(x0, y0 + 44 + len(nodes) * 34, anchor="w",
                           text=f"Adresse de la racine : 0x{id(self.racine):016X}",
-                          font=("Consolas", 10, "bold"), fill="#067647")
+                          font=("Consolas", 9, "bold"), fill="#067647")
             # Vue de l'arbre à droite, ajustée à la hauteur de la table.
             tx = x0 + table_w + 28
             c.create_text(tx, 0, anchor="nw", text="ARBRE · VALEUR | GAUCHE | DROITE",
-                          font=("Arial", 15, "bold"), fill="#101828")
+                          font=("Arial", 13, "bold"), fill="#101828")
             preorder = []
             def placer(n, depth=0):
                 if n is None: return
@@ -3732,12 +4468,12 @@ class Application(tk.Tk):
             occupes = list(self.positions.values())
             for n, (x, y) in self.positions.items():
                 if n.gauche is None:
-                    cote, px, py = "gauche", max(24, x - 48), y + 78
-                    while any((px - ox) ** 2 + (py - oy) ** 2 < 36 ** 2 for ox, oy in occupes):
+                    cote, px, py = "gauche", max(26, x - 52), y + 78
+                    while any((px - ox) ** 2 + (py - oy) ** 2 < 46 ** 2 for ox, oy in occupes):
                         if px > 24:
-                            px = max(24, px - 36)
+                            px = max(26, px - 46)
                         else:
-                            py += 36
+                            py += 46
                     self.positions_vides_base[(n, cote)] = (px, py)
                     dx, dy = self.decalages_vides.get((n, cote), (0, 0))
                     px, py = px + dx, py + dy
@@ -3745,16 +4481,16 @@ class Application(tk.Tk):
                     occupes.append((px, py))
                 if n.droite is None:
                     cote, px, py = "droite", x + 48, y + 78
-                    while any((px - ox) ** 2 + (py - oy) ** 2 < 36 ** 2 for ox, oy in occupes):
-                        px += 36
+                    while any((px - ox) ** 2 + (py - oy) ** 2 < 46 ** 2 for ox, oy in occupes):
+                        px += 46
                     self.positions_vides_base[(n, cote)] = (px, py)
                     dx, dy = self.decalages_vides.get((n, cote), (0, 0))
                     px, py = px + dx, py + dy
                     self.emplacements_vides.append((n, cote, px, py))
                     occupes.append((px, py))
             if self.emplacements_vides:
-                w = max(w, max(x + 24 for _, _, x, _ in self.emplacements_vides))
-                h = max(h, max(y + 24 for _, _, _, y in self.emplacements_vides))
+                w = max(w, max(x + 28 for _, _, x, _ in self.emplacements_vides))
+                h = max(h, max(y + 28 for _, _, _, y in self.emplacements_vides))
         c.configure(scrollregion=(0, 0, w, h))
         if self.selection is not None and self.selection not in self.positions:
             self.selection = None
@@ -3801,11 +4537,31 @@ class Application(tk.Tk):
             px, py = self.positions[parent]
             selectionne = parent is self.selection and self.dessin_cote.get() == cote
             couleur = "#D97706" if selectionne else "#98A2B3"
-            c.create_line(px, py + RAYON, x, y - 15, fill=couleur, width=2,
+            c.create_line(px, py + RAYON, x, y - (RAYON + 1), fill=couleur, width=2,
                           dash=(3, 3), arrow="last", arrowshape=(8, 10, 4))
-            c.create_oval(x - 15, y - 15, x + 15, y + 15, fill=C_FOND,
+            c.create_oval(x - (RAYON + 1), y - (RAYON + 1), x + (RAYON + 1), y + (RAYON + 1), fill=C_FOND,
                           outline=couleur, width=2, dash=(3, 3))
-            c.create_text(x, y, text="∅", fill=couleur, font=("Arial", 12, "bold"))
+            c.create_text(x, y, text="∅", fill=couleur, font=("Arial", 13, "bold"))
+        # Sous-arbres vides rencontrés par l'algorithme (case « Détailler »).
+        deja = set()
+        for parent, cote in self.nils_vus:
+            if parent not in self.positions or (id(parent), cote) in deja:
+                continue
+            if (parent.gauche if cote == "gauche" else parent.droite) is not None:
+                continue
+            deja.add((id(parent), cote))
+            px, py = self.positions[parent]
+            emp = next(((ex, ey) for p, k, ex, ey in self.emplacements_vides
+                        if p is parent and k == cote), None)
+            nx, ny = emp if emp else (px + (-44 if cote == "gauche" else 44), py + 66)
+            actuel = self.nil_courant is not None and self.nil_courant[0] is parent \
+                and self.nil_courant[1] == cote
+            col = "#D97706" if actuel else "#667085"
+            c.create_line(px, py + RAYON, nx, ny - (RAYON + 1), fill=col, width=3 if actuel else 2,
+                          dash=(3, 3), arrow="last", arrowshape=(8, 10, 4))
+            c.create_oval(nx - (RAYON + 1), ny - (RAYON + 1), nx + (RAYON + 1), ny + (RAYON + 1), fill="#FFF4DC" if actuel else C_FOND,
+                          outline=col, width=3 if actuel else 2)
+            c.create_text(nx, ny, text="NIL", fill=col, font=("Arial", 10, "bold"))
         # nœuds
         for n, (x, y) in self.positions.items():
             self.dessiner_noeud(c, n, x, y)
@@ -3875,7 +4631,7 @@ class Application(tk.Tk):
         c.create_oval(x - 0.50 * r, y - 0.86 * r, x + 0.50 * r, y - 0.30 * r,
                       fill=melange(base, "#FFFFFF", 0.75), outline="")
         # texte (légère gravure blanche dessous)
-        police = ("Arial", 12, "bold")
+        police = ("Arial", 11, "bold")
         c.create_text(x, y + 1, text=str(n.valeur), font=police, fill=melange(base, "#FFFFFF", 0.8))
         couleur_texte = "white" if base == "#30343B" else "#1C1C1E"
         c.create_text(x, y, text=str(n.valeur), font=police, fill=couleur_texte)
@@ -3893,7 +4649,7 @@ class Application(tk.Tk):
     def emplacement_vide_en(self, x, y):
         """Renvoie le parent et le côté de la bulle vide touchée, si présente."""
         for parent, cote, px, py in self.emplacements_vides:
-            if (px - x) ** 2 + (py - y) ** 2 <= 18 ** 2:
+            if (px - x) ** 2 + (py - y) ** 2 <= (RAYON + 3) ** 2:
                 return parent, cote, px, py
         return None
 
@@ -4217,6 +4973,8 @@ class Application(tk.Tk):
         self.finir_en_cours()
         self.marques = {}
         self.courant = None
+        self.nils_vus = []
+        self.nil_courant = None
         self.appels_recursifs = []
 
     def finir_en_cours(self):
@@ -4227,6 +4985,8 @@ class Application(tk.Tk):
         self.finir_en_cours()
         self.marques = {}
         self.courant = None
+        self.nils_vus = []
+        self.nil_courant = None
         self.sequence = []
         self.maj_sequence()
         self.dessiner()
@@ -4245,14 +5005,15 @@ class Application(tk.Tk):
         if algo:
             self.afficher_algo(algo)
         self.en_cours = True
-        if (not self.animer.get()) or not events:
+        if (not self.animer.get() and not self.pas_a_pas.get()) or not events:
             self.terminer_rapide()
             return
         self.pause = self.pas_a_pas.get()
         self.btn_pause.config(text="▶ Reprendre" if self.pause else "⏸ Pause")
         self.res_notebook.select(self.tab_trace)
         if self.pause:
-            self.log("(mode pas à pas : cliquez sur ⏭ Suivant)")
+            self.log("(mode pas à pas : cliquez sur ⏭ Suivant ou appuyez sur F8)")
+        self.maj_etape()
         self.dessiner()
         if not self.pause:
             self._tick()
@@ -4260,6 +5021,11 @@ class Application(tk.Tk):
     def appliquer(self, ev):
         """Met à jour les couleurs, la pile récursive, la trace et la séquence."""
         n = ev.noeud
+        self.nil_courant = None
+        if ev.kind == "empty" and n is not None and ev.cote:
+            cote = "gauche" if str(ev.cote).startswith("g") else "droite"
+            self.nils_vus.append((n, cote))
+            self.nil_courant = (n, cote)
         if ev.kind == "call" and n is not None:
             self.appels_recursifs.append(n)
         elif ev.kind == "return" and n is not None:
@@ -4299,6 +5065,7 @@ class Application(tk.Tk):
         ev = self.events[self.ev_i]
         self.ev_i += 1
         self.appliquer(ev)
+        self.maj_etape()
         self.dessiner()
 
     def _tick(self):
@@ -4332,7 +5099,9 @@ class Application(tk.Tk):
         self.annuler_job()
         self.en_cours = False
         self.courant = None
+        self.nil_courant = None
         self.appels_recursifs = []
+        self.maj_etape()
         self.log("— fin —")
         cb, self.on_finish = self.on_finish, None
         if cb:
@@ -4353,8 +5122,23 @@ class Application(tk.Tk):
             self.annuler_job()
             self.btn_pause.config(text="▶ Reprendre")
 
+    def maj_etape(self, message=None):
+        """Affiche « Étape i / n » dans les panneaux de commande."""
+        if message is None:
+            if self.en_cours and self.events:
+                message = f"Étape {self.ev_i} / {len(self.events)}"
+                if self.pause:
+                    message += "  —  ⏭ Suivant (ou F8) pour continuer"
+            else:
+                message = ""
+        for lbl in self.lbls_etape:
+            lbl.config(text=message)
+
     def bouton_suivant(self):
+        """Exécute une seule étape de l'algorithme en cours (mode pas à pas)."""
         if not self.en_cours:
+            self.maj_etape("Aucune exécution en cours : lancez d'abord un parcours "
+                           "(RGD, GRD, GDR…) ou une mesure, puis cliquez sur ⏭ Suivant.")
             return
         self.pause = True
         self.annuler_job()
@@ -4902,7 +5686,8 @@ class Application(tk.Tk):
             if n is None:
                 if details and parent is not None:
                     events.append(Ev(parent, "empty",
-                                     f"{pad}sous-arbre {cote} de {parent.valeur} vide (NIL) → retour"))
+                                     f"{pad}sous-arbre {cote} de {parent.valeur} vide (NIL) → retour",
+                                     cote=cote))
                 return
             events.append(Ev(n, "call", f"{pad}Appel récursif sur le sous-arbre de {n.valeur}"))
             events.append(Ev(n, "enter", f"{pad}{nom.split(' (')[0]}({n.valeur})"))
@@ -4992,7 +5777,8 @@ class Application(tk.Tk):
             if n is None:
                 if details and parent is not None:
                     events.append(Ev(parent, "empty",
-                                     f"{pad}sous-arbre {cote} vide → {fmt(vide)}"))
+                                     f"{pad}sous-arbre {cote} vide → {fmt(vide)}",
+                                     cote=cote))
                 return vide
             events.append(Ev(n, "call", f"{pad}Appel récursif sur le sous-arbre de {n.valeur}"))
             events.append(Ev(n, "enter", f"{pad}appel sur le nœud {n.valeur}"))
@@ -5301,15 +6087,20 @@ class Application(tk.Tk):
         if not self.exiger_arbre():
             return
         events, mauvais = [], []
+        details = self.details.get()
 
-        def rec(n, d):
-            if n is None:
-                return
+        def rec(n, d, parent=None, cote=""):
             pad = "   " * d
+            if n is None:
+                if details and parent is not None:
+                    events.append(Ev(parent, "empty",
+                                     f"{pad}sous-arbre {cote} de {parent.valeur} vide (NIL) → retour",
+                                     cote=cote))
+                return
             events.append(Ev(n, "call", f"{pad}Appel récursif sur le sous-arbre de {n.valeur}"))
             events.append(Ev(n, "enter", f"{pad}examiner {n.valeur}"))
-            rec(n.gauche, d + 1)
-            rec(n.droite, d + 1)
+            rec(n.gauche, d + 1, n, "gauche")
+            rec(n.droite, d + 1, n, "droit")
             ok, msg = cond(n)
             events.append(Ev(n, "visit" if ok else "bad", f"{pad}{msg}"))
             if not ok:
