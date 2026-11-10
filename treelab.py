@@ -5687,7 +5687,7 @@ class Application(tk.Tk):
         if self.vue_pointeurs.get():
             nodes = noeuds(self.racine, "RGD")
             table_h = 96 + len(nodes) * 34
-            table_w, tree_w = 820, max(520, 250 * len(nodes))
+            table_w, tree_w = 820, max(520, 400 * len(nodes))
             c.configure(scrollregion=(0, 0, table_w + tree_w + 40, table_h))
             x0, y0 = 24, 24
             c.create_text(x0, 0, anchor="nw", text="STRUCTURE MÉMOIRE · ADRESSES HEXADÉCIMALES",
@@ -5721,7 +5721,7 @@ class Application(tk.Tk):
             placer(self.racine)
             max_depth = max(d for _, d in preorder)
             gap_x = (tree_w - 90) / max(1, len(nodes))
-            self._pointer_node_width = min(234, gap_x * 0.88)
+            self._pointer_node_width = min(360, gap_x * 0.88)
             gap_y = max(48, (table_h - 92) / max(1, max_depth))
             self.positions = {}
             self.base = {}
@@ -5734,9 +5734,10 @@ class Application(tk.Tk):
                 for child, side in ((n.gauche, "g"), (n.droite, "d")):
                     if child in self.positions:
                         fx, fy = self.positions[child]
-                        largeur_case = self._pointer_node_width / 3
-                        # Le pointeur gauche part de sa case centrale, le droit de sa case droite.
-                        depart_x = x if side == "g" else x + largeur_case
+                        L = self._pointer_node_width
+                        # Le pointeur gauche part du centre de sa case, le droit du centre de la sienne
+                        # (proportions : valeur 20 %, gauche 40 %, droite 40 %).
+                        depart_x = x - 0.1 * L if side == "g" else x + 0.3 * L
                         c.create_line(depart_x, y + 21, fx, fy - 21,
                                       arrow="last", arrowshape=(10, 12, 4),
                                       width=2, fill="#475467")
@@ -5858,9 +5859,9 @@ class Application(tk.Tk):
                               fill="#555")
         self._appliquer_zoom(w, h)
 
-    def dessiner_noeud_pointeurs(self, c, n, x, y, largeur=234):
+    def dessiner_noeud_pointeurs(self, c, n, x, y, largeur=360):
         """Dessine les cases valeur/gauche/droite utilisées comme zones cliquables."""
-        widths, h = (largeur / 3,) * 3, 42
+        widths, h = (largeur * 0.2, largeur * 0.4, largeur * 0.4), 42
         left = x - sum(widths) / 2
         vals = (str(n.valeur), f"0x{id(n.gauche):016X}" if n.gauche else "NULL",
                 f"0x{id(n.droite):016X}" if n.droite else "NULL")
@@ -5926,7 +5927,7 @@ class Application(tk.Tk):
     def noeud_en(self, x, y):
         """Trouve le nœud dont la zone dessinée contient le point du clic."""
         for n, (nx, ny) in self.positions.items():
-            half_width = getattr(self, "_pointer_node_width", 234) / 2
+            half_width = getattr(self, "_pointer_node_width", 360) / 2
             if self.vue_pointeurs.get() and nx - half_width <= x <= nx + half_width and ny - 22 <= y <= ny + 22:
                 return n
             if (nx - x) ** 2 + (ny - y) ** 2 <= RAYON ** 2:
